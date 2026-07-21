@@ -30,6 +30,7 @@ import type {
   KnowledgeCard,
 } from './contracts';
 import { SessionSwitcherModal } from './SessionSwitcherModal';
+import { StashedCardRail } from './StashedCardRail';
 import { TextSelectionModal } from './TextSelectionModal';
 import { palette, radii, spacing } from '@/src/ui/theme';
 
@@ -67,6 +68,7 @@ export function AICompanionScreen() {
   const [runtimeStatus, setRuntimeStatus] = useState<AgentRuntimeStatus>({ phase: 'checking' });
   const [selectionMessage, setSelectionMessage] = useState<CompanionMessage | null>(null);
   const [cards, setCards] = useState<KnowledgeCard[]>([]);
+  const [stashedCardIds, setStashedCardIds] = useState<string[]>([]);
   const [activeCard, setActiveCard] = useState<KnowledgeCard | null>(null);
   const [sessionPickerVisible, setSessionPickerVisible] = useState(false);
   const listRef = useRef<FlatList<CompanionMessage>>(null);
@@ -78,6 +80,12 @@ export function AICompanionScreen() {
   );
   const messages = activeSession.messages;
   const statusLabel = agentStatusLabel(runtimeStatus);
+  const stashedCards = useMemo(
+    () => stashedCardIds
+      .map((cardId) => cards.find((card) => card.card_id === cardId))
+      .filter((card): card is KnowledgeCard => Boolean(card)),
+    [cards, stashedCardIds],
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -233,6 +241,7 @@ export function AICompanionScreen() {
     try {
       const result = await generateKnowledgeCard(cardInput);
       setCards((current) => [...current, result.card]);
+      setStashedCardIds((current) => current.filter((cardId) => cardId !== result.card.card_id));
       setActiveCard(result.card);
       setRuntimeStatus({
         phase: 'completed',
@@ -276,6 +285,41 @@ export function AICompanionScreen() {
       [
         { text: '取消', style: 'cancel' },
         { text: '新建会话', onPress: () => startDetailConversation(card) },
+      ],
+    );
+  }
+
+  function stashCard(cardId: string) {
+    setStashedCardIds((current) => (
+      current.includes(cardId) ? current : [...current, cardId]
+    ));
+    setActiveCard((current) => current?.card_id === cardId ? null : current);
+  }
+
+  function restoreCard(cardId: string) {
+    const card = cards.find((item) => item.card_id === cardId);
+    if (!card) return;
+    setStashedCardIds((current) => current.filter((item) => item !== cardId));
+    setActiveCard(card);
+  }
+
+  function requestDeleteCard(cardId: string) {
+    const card = cards.find((item) => item.card_id === cardId);
+    if (!card) return;
+    Alert.alert(
+      '删除知识卡片？',
+      `“${card.title}”删除后无法从暂存区恢复。`,
+      [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '删除',
+          style: 'destructive',
+          onPress: () => {
+            setCards((current) => current.filter((item) => item.card_id !== cardId));
+            setStashedCardIds((current) => current.filter((item) => item !== cardId));
+            setActiveCard((current) => current?.card_id === cardId ? null : current);
+          },
+        },
       ],
     );
   }
@@ -343,6 +387,7 @@ export function AICompanionScreen() {
             keyboardShouldPersistTaps="handled"
             onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
           />
+          <StashedCardRail cards={stashedCards} onRestore={restoreCard} />
         </View>
 
         {isGenerating && (
@@ -392,8 +437,12 @@ export function AICompanionScreen() {
       />
       <CompactKnowledgeCard
         card={activeCard}
-        onClose={() => setActiveCard(null)}
+        onClose={() => {
+          if (activeCard) stashCard(activeCard.card_id);
+        }}
         onLearnMore={requestLearnMore}
+        onRequestDelete={requestDeleteCard}
+        onStash={stashCard}
       />
       <SessionSwitcherModal
         activeSessionId={activeSession.id}

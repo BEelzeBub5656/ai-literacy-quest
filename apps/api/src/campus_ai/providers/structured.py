@@ -40,6 +40,7 @@ async def generate_structured(
     messages: list[AIMessage],
     max_tokens: int = 1800,
     max_attempts: int = 3,
+    model: str | None = None,
 ) -> StructuredCompletion[SchemaT]:
     schema_json = json.dumps(schema.model_json_schema(), ensure_ascii=False)
     contract_message = AIMessage(
@@ -61,6 +62,7 @@ async def generate_structured(
                 messages=attempt_messages,
                 temperature=0.15,
                 max_tokens=max_tokens,
+                model=model,
             )
         )
         try:
@@ -93,4 +95,3 @@ async def generate_structured(
     raise StructuredOutputError(
         f"模型连续 {max_attempts} 次未能生成有效结构化输出：{last_error[:300]}"
     )
-

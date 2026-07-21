@@ -13,6 +13,7 @@ class AICompletionRequest(BaseModel):
     messages: list[AIMessage] = Field(min_length=1)
     temperature: float = Field(default=0.2, ge=0, le=2)
     max_tokens: int = Field(default=700, ge=32, le=4096)
+    model: str | None = Field(default=None, min_length=1, max_length=120)
 
 
 class AICompletion(BaseModel):
@@ -33,4 +34,3 @@ class AIProvider(ABC):
     @abstractmethod
     async def complete(self, request: AICompletionRequest) -> AICompletion:
         raise NotImplementedError
-

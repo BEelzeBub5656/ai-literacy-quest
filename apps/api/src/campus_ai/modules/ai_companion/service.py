@@ -211,6 +211,11 @@ class AICompanionService:
                 AIMessage(role="user", content=prompt),
             ],
             max_tokens=900,
+            model=(
+                self._settings.resolved_deepseek_flash_model
+                if self._settings.ai_provider == "deepseek"
+                else None
+            ),
         )
         draft = completion.value
         card_id = f"card-{uuid4().hex}"

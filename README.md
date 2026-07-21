@@ -31,7 +31,9 @@ apps/
 
 ### 1. 配置
 
-复制 `.env.example` 为 `.env`。默认使用 Mock Provider，无需任何密钥即可启动。若复用本机已有 DeepSeek 配置，可设置 `AI_PROVIDER=deepseek` 与 `DEEPSEEK_ENV_FILE=已有 .env 的绝对路径`，无需复制密钥。
+复制 `.env.example` 为 `.env`。默认使用 Mock Provider，无需任何密钥即可启动。若复用本机已有 DeepSeek 配置，可设置 `AI_PROVIDER=deepseek` 与 `DEEPSEEK_ENV_FILE=已有 .env 的绝对路径`，无需复制密钥。主对话使用 `DEEPSEEK_PRO_MODEL`，知识卡片提炼使用 `DEEPSEEK_FLASH_MODEL`；旧的 `DEEPSEEK_MODEL` 仍可作为主对话模型别名。
+
+紧凑知识卡支持左滑暂存、右滑请求删除；暂存后的卡片会收纳到对话左侧，可随时恢复并继续“详细了解”。
 
 ### 2. 后端
 

@@ -66,7 +66,10 @@ class Settings(BaseSettings):
     deepseek_env_file: str | None = None
     deepseek_api_key: str | None = None
     deepseek_base_url: str = "https://api.deepseek.com"
-    deepseek_model: str = "deepseek-v4-pro"
+    # DEEPSEEK_MODEL is kept as a backwards-compatible alias for the main model.
+    deepseek_model: str | None = None
+    deepseek_pro_model: str = "deepseek-v4-pro"
+    deepseek_flash_model: str = "deepseek-v4-flash"
     deepseek_timeout_seconds: float = 90.0
     deepseek_reasoning_effort: Literal["low", "medium", "high"] = "high"
 
@@ -89,9 +92,23 @@ class Settings(BaseSettings):
 
     @property
     def resolved_deepseek_model(self) -> str:
+        return self.resolved_deepseek_pro_model
+
+    @property
+    def resolved_deepseek_pro_model(self) -> str:
+        values = self.external_deepseek_values
+        return (
+            values.get("DEEPSEEK_PRO_MODEL")
+            or values.get("DEEPSEEK_MODEL")
+            or self.deepseek_model
+            or self.deepseek_pro_model
+        )
+
+    @property
+    def resolved_deepseek_flash_model(self) -> str:
         return self.external_deepseek_values.get(
-            "DEEPSEEK_MODEL",
-            self.deepseek_model,
+            "DEEPSEEK_FLASH_MODEL",
+            self.deepseek_flash_model,
         )
 
     @computed_field
@@ -128,7 +145,8 @@ class Settings(BaseSettings):
         return bool(
             self.resolved_deepseek_api_key
             and self.resolved_deepseek_base_url
-            and self.resolved_deepseek_model
+            and self.resolved_deepseek_pro_model
+            and self.resolved_deepseek_flash_model
         )
 
     @computed_field

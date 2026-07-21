@@ -32,7 +32,10 @@ class DeepSeekAIProvider(AIProvider):
 
     @property
     def model(self) -> str:
-        return self._settings.resolved_deepseek_model
+        return self._settings.resolved_deepseek_pro_model
+
+    def _request_model(self, request: AICompletionRequest) -> str:
+        return request.model or self.model
 
     def _url(self) -> str:
         return f"{self._settings.resolved_deepseek_base_url.rstrip('/')}/chat/completions"
@@ -54,7 +57,7 @@ class DeepSeekAIProvider(AIProvider):
         thinking_enabled: bool,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
-            "model": self.model,
+            "model": self._request_model(request),
             "messages": [message.model_dump() for message in request.messages],
             "temperature": request.temperature,
             "max_tokens": request.max_tokens,
@@ -96,7 +99,11 @@ class DeepSeekAIProvider(AIProvider):
 
         if not isinstance(content, str) or not content.strip():
             raise DeepSeekProviderError("DeepSeek 返回了空内容。")
-        return AICompletion(provider=self.name, model=self.model, content=content.strip())
+        return AICompletion(
+            provider=self.name,
+            model=self._request_model(request),
+            content=content.strip(),
+        )
 
     async def stream(
         self,

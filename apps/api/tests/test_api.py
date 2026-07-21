@@ -5,8 +5,17 @@ import pytest
 
 from campus_ai.core.config import Settings, get_settings
 from campus_ai.main import app
+from campus_ai.modules.ai_companion.schemas import (
+    GenerateKnowledgeCardRequest,
+    KeywordDraft,
+    KnowledgeCardDraft,
+    ReasoningStep,
+)
+from campus_ai.modules.ai_companion.service import AICompanionService
 from campus_ai.providers.base import AICompletionRequest, AIMessage
+from campus_ai.providers.deepseek import DeepSeekAIProvider
 from campus_ai.providers.service import AIService
+from campus_ai.providers.structured import StructuredCompletion
 
 
 @pytest.fixture(autouse=True)
@@ -125,3 +134,83 @@ async def test_unconfigured_longcat_falls_back_to_mock() -> None:
     )
     assert result.provider == "mock"
     assert result.fallback_used is True
+
+
+@pytest.mark.asyncio
+async def test_knowledge_card_uses_flash_while_chat_defaults_to_pro(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = Settings(
+        _env_file=None,
+        ai_provider="deepseek",
+        deepseek_api_key="test-key",
+        deepseek_model=None,
+        deepseek_pro_model="deepseek-pro-test",
+        deepseek_flash_model="deepseek-flash-test",
+        allow_mock_fallback=False,
+    )
+    provider = DeepSeekAIProvider(settings)
+    chat_request = AICompletionRequest(
+        messages=[AIMessage(role="user", content="解释训练数据")]
+    )
+    assert provider._payload(
+        chat_request,
+        stream=False,
+        thinking_enabled=False,
+    )["model"] == "deepseek-pro-test"
+
+    captured: dict[str, str | None] = {}
+
+    async def fake_generate_structured(*args, **kwargs):
+        captured["model"] = kwargs.get("model")
+        draft = KnowledgeCardDraft(
+            schema_version="1.0",
+            title="训练数据",
+            plain_explanation="训练数据是模型用来发现规律的样本集合。",
+            reasoning_summary="根据用户选中的概念提炼核心定义。",
+            reasoning_steps=[
+                ReasoningStep(
+                    step=1,
+                    title="提炼定义",
+                    explanation="从来源消息中提取概念的核心含义。",
+                    based_on=["message-test"],
+                )
+            ],
+            key_points=["决定模型学习范围", "质量影响模型表现"],
+            keywords=[
+                KeywordDraft(
+                    text="样本",
+                    normalized_text="样本",
+                    definition="用于训练或测试的数据实例。",
+                    selection_reason="与训练数据直接相关。",
+                    confidence=0.95,
+                ),
+                KeywordDraft(
+                    text="模型",
+                    normalized_text="模型",
+                    definition="从数据中学习规律的计算系统。",
+                    selection_reason="是训练数据的使用者。",
+                    confidence=0.92,
+                ),
+            ],
+        )
+        return StructuredCompletion(
+            value=draft,
+            provider="deepseek",
+            model=kwargs.get("model") or "missing",
+            fallback_used=False,
+        )
+
+    monkeypatch.setattr(
+        "campus_ai.modules.ai_companion.service.generate_structured",
+        fake_generate_structured,
+    )
+    response = await AICompanionService(settings).generate_card(
+        GenerateKnowledgeCardRequest(
+            selected_text="训练数据",
+            source_message_id="message-test",
+            source_message_content="训练数据会影响模型最终学到的规律。",
+        )
+    )
+    assert captured["model"] == "deepseek-flash-test"
+    assert response.model == "deepseek-flash-test"
