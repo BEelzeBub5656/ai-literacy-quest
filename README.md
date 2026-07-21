@@ -31,7 +31,7 @@ apps/
 
 ### 1. 配置
 
-复制 `.env.example` 为 `.env`。默认使用 Mock Provider，无需任何密钥即可启动。
+复制 `.env.example` 为 `.env`。默认使用 Mock Provider，无需任何密钥即可启动。若复用本机已有 DeepSeek 配置，可设置 `AI_PROVIDER=deepseek` 与 `DEEPSEEK_ENV_FILE=已有 .env 的绝对路径`，无需复制密钥。
 
 ### 2. 后端
 
@@ -56,7 +56,7 @@ npm run start
 | 接口 | 说明 |
 |---|---|
 | `POST /api/v1/ai/study-chat` | 结构化伴学对话（返回推理步骤 + 关键词） |
-| `POST /api/v1/ai/study-chat/stream` | 流式伴学对话（SSE） |
+| `POST /api/v1/ai/study-chat/stream` | DeepSeek 推理与正文分离的流式伴学对话（SSE） |
 | `POST /api/v1/ai/knowledge-card` | 选中文本生成知识卡片 |
 | `GET /api/v1/ai/status` | AI Provider 状态 |
 

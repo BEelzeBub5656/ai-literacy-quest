@@ -7,8 +7,15 @@ import {
   inlineKeywordDraftSchema,
   type CompanionMessage,
   type InlineKeywordDraft,
-  type KnowledgeCard,
 } from './contracts';
+
+const aiStatusSchema = z.object({
+  provider: z.string(),
+  configured: z.boolean(),
+  mock_fallback_enabled: z.boolean(),
+}).strict();
+
+export type AIServiceStatus = z.infer<typeof aiStatusSchema>;
 
 const fallbackHost = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
 const apiBase = process.env.EXPO_PUBLIC_API_BASE_URL ?? `http://${fallbackHost}:8000/api/v1`;
@@ -108,7 +115,7 @@ export async function streamStudyChat(
   });
 
   if (!response.ok) {
-    throw new Error(`DeepSeek 流式请求失败：HTTP ${response.status}`);
+    throw new Error(`AI 流式请求失败：HTTP ${response.status}`);
   }
   if (!response.body) {
     throw new Error('当前运行环境没有提供可读取的响应流。');
@@ -131,6 +138,11 @@ export async function streamStudyChat(
   if (buffer.trim()) dispatchSseBlock(buffer.trim(), handlers);
 }
 
+export async function getAIServiceStatus(): Promise<AIServiceStatus> {
+  const payload = await requestJson('/ai/status', { method: 'GET' });
+  return aiStatusSchema.parse(payload);
+}
+
 type GenerateCardInput = {
   selectedText: string;
   sourceMessageId: string;
@@ -139,7 +151,7 @@ type GenerateCardInput = {
   keywordContext?: string | null;
 };
 
-export async function generateKnowledgeCard(input: GenerateCardInput): Promise<KnowledgeCard> {
+export async function generateKnowledgeCard(input: GenerateCardInput) {
   const payload = await requestJson('/ai/knowledge-card', {
     method: 'POST',
     body: JSON.stringify({
@@ -150,7 +162,7 @@ export async function generateKnowledgeCard(input: GenerateCardInput): Promise<K
       keyword_context: input.keywordContext ?? null,
     }),
   });
-  return generateKnowledgeCardResponseSchema.parse(payload).card;
+  return generateKnowledgeCardResponseSchema.parse(payload);
 }
 
 export { apiBase };

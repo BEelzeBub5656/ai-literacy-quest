@@ -54,7 +54,10 @@ export function HighlightedText({
   selectable = true,
   onKeywordPress,
 }: Props) {
-  const segments = splitByKeywords(text, keywords);
+  const displayText = text
+    .replace(/\*\*/g, '')
+    .replace(/^#{1,6}\s+/gm, '');
+  const segments = splitByKeywords(displayText, keywords);
   return (
     <Text selectable={selectable} style={style}>
       {segments.map((segment, index): ReactNode => {

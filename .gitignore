@@ -10,6 +10,7 @@ node_modules/
 dist/
 .vite/
 .expo/
+.playwright-cli/
 
 # Local configuration and data
 .env

@@ -201,13 +201,16 @@ class AICompanionService:
                 AIMessage(
                     role="system",
                     content=(
-                        "你是知识卡片编辑器。卡片要短而完整，推演步骤必须说明"
-                        "如何从来源文本得到当前解释；不要声称展示隐藏思维链。"
+                        "你是移动端知识卡片编辑器。知识卡只负责提炼，不负责展开讲课。"
+                        "标题不超过 12 个中文字符；plain_explanation 用 50 至 90 个中文字符"
+                        "概括一个核心结论；只保留 2 至 3 条简短 key_points。"
+                        "reasoning_steps 仅记录 1 至 3 条可审计的来源说明，"
+                        "不要展示或声称展示隐藏思维链。"
                     ),
                 ),
                 AIMessage(role="user", content=prompt),
             ],
-            max_tokens=1700,
+            max_tokens=900,
         )
         draft = completion.value
         card_id = f"card-{uuid4().hex}"

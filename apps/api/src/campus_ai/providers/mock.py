@@ -131,7 +131,7 @@ def _mock_study_chat() -> dict:
 
 
 def _mock_knowledge_card(selected_text: str) -> dict:
-    focus = selected_text[:28] or "当前知识点"
+    focus = selected_text[:10] or "当前知识点"
     return {
         "schema_version": "1.0",
         "title": f"理解 {focus}",

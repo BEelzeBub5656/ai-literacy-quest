@@ -103,7 +103,14 @@ class Settings(BaseSettings):
             if origin.strip()
         }
         if self.app_env == "development":
-            origins.update({"http://localhost:5173", "http://localhost:8081"})
+            origins.update(
+                {
+                    "http://localhost:5173",
+                    "http://localhost:8081",
+                    "http://127.0.0.1:5173",
+                    "http://127.0.0.1:8081",
+                }
+            )
         return sorted(origins)
 
     @computed_field

@@ -54,11 +54,11 @@ export const knowledgeCardSchema = z.object({
   source_message_id: z.string(),
   selected_text: z.string(),
   title: z.string(),
-  plain_explanation: z.string(),
+  plain_explanation: z.string().max(180),
   reasoning_summary: z.string(),
-  reasoning_steps: z.array(reasoningStepSchema).min(2).max(5),
-  key_points: z.array(z.string()).min(2).max(6),
-  keywords: z.array(keywordSchema).min(3).max(6),
+  reasoning_steps: z.array(reasoningStepSchema).min(1).max(3),
+  key_points: z.array(z.string()).min(2).max(3),
+  keywords: z.array(keywordSchema).min(2).max(4),
   evidence_refs: z.array(evidenceRefSchema),
   assumptions: z.array(z.string()).max(5),
   uncertainties: z.array(z.string()).max(5),
@@ -88,4 +88,32 @@ export type CompanionMessage = {
   keywords?: InlineKeywordItem[];
   provider?: string;
   model?: string;
+};
+
+export type ConversationSession = {
+  id: string;
+  title: string;
+  messages: CompanionMessage[];
+  contextMessages: CompanionMessage[];
+  parentConversationId?: string;
+  sourceCardId?: string;
+};
+
+export type AgentRuntimePhase =
+  | 'checking'
+  | 'ready'
+  | 'connecting'
+  | 'reasoning'
+  | 'answering'
+  | 'extracting'
+  | 'generating_card'
+  | 'completed'
+  | 'error';
+
+export type AgentRuntimeStatus = {
+  phase: AgentRuntimePhase;
+  provider?: string;
+  model?: string;
+  configured?: boolean;
+  fallbackEnabled?: boolean;
 };

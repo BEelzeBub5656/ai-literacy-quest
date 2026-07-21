@@ -7,11 +7,11 @@ import { palette, radii, spacing } from '@/src/ui/theme';
 
 type Props = {
   message: CompanionMessage;
-  onLongPress: (message: CompanionMessage) => void;
+  onSelectionRequest: (message: CompanionMessage) => void;
   onKeywordPress: (message: CompanionMessage, keyword: InlineKeywordItem) => void;
 };
 
-export function ChatMessageBubble({ message, onLongPress, onKeywordPress }: Props) {
+export function ChatMessageBubble({ message, onSelectionRequest, onKeywordPress }: Props) {
   const isUser = message.role === 'user';
   const [reasoningExpanded, setReasoningExpanded] = useState(true);
   const autoCollapsed = useRef(false);
@@ -25,13 +25,10 @@ export function ChatMessageBubble({ message, onLongPress, onKeywordPress }: Prop
 
   return (
     <View style={[styles.row, isUser && styles.userRow]}>
-      <Pressable
-        delayLongPress={350}
-        onLongPress={() => onLongPress(message)}
-        style={({ pressed }) => [
+      <View
+        style={[
           styles.bubble,
           isUser ? styles.userBubble : styles.assistantBubble,
-          pressed && styles.pressed,
         ]}>
         {!isUser && (
           <View style={styles.roleRow}>
@@ -71,9 +68,19 @@ export function ChatMessageBubble({ message, onLongPress, onKeywordPress }: Prop
         ) : null}
 
         {!isUser && Boolean(message.keywords?.length) && (
-          <Text style={styles.hint}>带下划线的重点词可继续生长为知识卡片 · 长按正文可精确选取</Text>
+          <Text style={styles.hint}>点击带下划线的重点词，可提炼为简明知识卡片。</Text>
         )}
-      </Pressable>
+        {!isUser && Boolean(message.content) && !message.isStreaming && (
+          <View style={styles.actionRow}>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => onSelectionRequest(message)}
+              style={({ pressed }) => [styles.actionButton, pressed && styles.actionPressed]}>
+              <Text style={styles.actionText}>选取片段</Text>
+            </Pressable>
+          </View>
+        )}
+      </View>
     </View>
   );
 }
@@ -84,7 +91,6 @@ const styles = StyleSheet.create({
   bubble: { maxWidth: '91%', padding: 14, borderRadius: radii.lg },
   assistantBubble: { backgroundColor: palette.surface, borderWidth: 1, borderColor: palette.border },
   userBubble: { backgroundColor: palette.indigo },
-  pressed: { opacity: 0.88 },
   roleRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 7 },
   role: { color: palette.purple, fontSize: 11, fontWeight: '800' },
   streamingDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: palette.mint },
@@ -105,4 +111,8 @@ const styles = StyleSheet.create({
   reasoningText: { color: '#686D82', fontSize: 12, lineHeight: 19, marginTop: 8 },
   waiting: { color: palette.faint, fontSize: 12, fontStyle: 'italic' },
   hint: { color: palette.faint, fontSize: 10, lineHeight: 15, marginTop: 11 },
+  actionRow: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10 },
+  actionButton: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 99, backgroundColor: palette.surfaceSoft },
+  actionPressed: { opacity: 0.72 },
+  actionText: { color: palette.indigo, fontSize: 11, fontWeight: '800' },
 });

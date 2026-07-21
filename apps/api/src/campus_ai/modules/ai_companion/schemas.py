@@ -103,12 +103,12 @@ class EvidenceRef(StrictModel):
 
 class KnowledgeCardDraft(StrictModel):
     schema_version: Literal["1.0"]
-    title: str = Field(min_length=2, max_length=80)
-    plain_explanation: str = Field(min_length=8, max_length=1200)
-    reasoning_summary: str = Field(min_length=8, max_length=500)
-    reasoning_steps: list[ReasoningStep] = Field(min_length=2, max_length=5)
-    key_points: list[str] = Field(min_length=2, max_length=6)
-    keywords: list[KeywordDraft] = Field(min_length=3, max_length=6)
+    title: str = Field(min_length=2, max_length=24)
+    plain_explanation: str = Field(min_length=8, max_length=180)
+    reasoning_summary: str = Field(min_length=8, max_length=240)
+    reasoning_steps: list[ReasoningStep] = Field(min_length=1, max_length=3)
+    key_points: list[str] = Field(min_length=2, max_length=3)
+    keywords: list[KeywordDraft] = Field(min_length=2, max_length=4)
     assumptions: list[str] = Field(default_factory=list, max_length=5)
     uncertainties: list[str] = Field(default_factory=list, max_length=5)
 

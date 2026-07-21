@@ -18,8 +18,7 @@ export function TextSelectionModal({ message, visible, onClose, onConfirm }: Pro
   const [selection, setSelection] = useState<Selection>({ start: 0, end: 0 });
 
   useEffect(() => {
-    const initialEnd = Math.min(message?.content.length ?? 0, 18);
-    setSelection({ start: 0, end: initialEnd });
+    setSelection({ start: 0, end: 0 });
   }, [message]);
 
   const selectedText = useMemo(() => {
@@ -35,13 +34,16 @@ export function TextSelectionModal({ message, visible, onClose, onConfirm }: Pro
         <SafeAreaView style={styles.sheet} edges={['bottom']}>
           <View style={styles.handle} />
           <Text style={styles.title}>选取知识片段</Text>
-          <Text style={styles.description}>拖动系统选区手柄，选择想沉淀为知识卡片的文字。</Text>
+          <Text style={styles.description}>长按文字并拖动选区手柄，选择想进一步理解的片段。</Text>
           <TextInput
+            autoFocus
             multiline
             readOnly
+            selectTextOnFocus={false}
+            showSoftInputOnFocus={false}
             value={message?.content ?? ''}
-            selection={selection}
             onSelectionChange={(event) => setSelection(event.nativeEvent.selection)}
+            selectionColor={palette.purple}
             style={styles.textArea}
           />
           <View style={styles.preview}>
@@ -56,7 +58,7 @@ export function TextSelectionModal({ message, visible, onClose, onConfirm }: Pro
               disabled={!message || !selectedText}
               onPress={() => message && selectedText && onConfirm(message, selectedText)}
               style={[styles.primaryButton, !selectedText && styles.disabledButton]}>
-              <Text style={styles.primaryText}>生成知识卡片</Text>
+              <Text style={styles.primaryText}>提炼知识卡片</Text>
             </Pressable>
           </View>
         </SafeAreaView>
@@ -95,4 +97,3 @@ const styles = StyleSheet.create({
   disabledButton: { opacity: 0.4 },
   primaryText: { color: '#FFFFFF', fontWeight: '800' },
 });
-
