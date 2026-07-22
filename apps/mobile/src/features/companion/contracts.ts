@@ -90,6 +90,33 @@ export type CompanionMessage = {
   model?: string;
 };
 
+export type CardNode = KnowledgeCard & {
+  children: CardNode[];
+  depth: number;
+};
+
+export function cardTreeFromList(cards: KnowledgeCard[]): CardNode[] {
+  const byId = new Map<string, CardNode>();
+  const roots: CardNode[] = [];
+
+  for (const card of cards) {
+    byId.set(card.card_id, { ...card, children: [], depth: 0 });
+  }
+
+  for (const node of byId.values()) {
+    if (node.parent_card_id && byId.has(node.parent_card_id)) {
+      const parent = byId.get(node.parent_card_id)!;
+      node.depth = parent.depth + 1;
+      parent.children.push(node);
+    } else {
+      node.depth = 0;
+      roots.push(node);
+    }
+  }
+
+  return roots;
+}
+
 export type ConversationSession = {
   id: string;
   title: string;

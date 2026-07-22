@@ -24,11 +24,13 @@ import {
 } from './conversation';
 import type {
   AgentRuntimeStatus,
+  CardNode,
   CompanionMessage,
   ConversationSession,
   InlineKeywordItem,
   KnowledgeCard,
 } from './contracts';
+import { cardTreeFromList } from './contracts';
 import { SessionSwitcherModal } from './SessionSwitcherModal';
 import { StashedCardRail } from './StashedCardRail';
 import { TextSelectionModal } from './TextSelectionModal';
@@ -68,10 +70,10 @@ export function AICompanionScreen() {
   const [runtimeStatus, setRuntimeStatus] = useState<AgentRuntimeStatus>({ phase: 'checking' });
   const [selectionMessage, setSelectionMessage] = useState<CompanionMessage | null>(null);
   const [cards, setCards] = useState<KnowledgeCard[]>([]);
+  const [expandedCardIds, setExpandedCardIds] = useState<Set<string>>(new Set());
   const [stashedCardIds, setStashedCardIds] = useState<string[]>([]);
-  const [activeCard, setActiveCard] = useState<KnowledgeCard | null>(null);
   const [sessionPickerVisible, setSessionPickerVisible] = useState(false);
-  const listRef = useRef<FlatList<CompanionMessage>>(null);
+  const listRef = useRef<FlatList<any>>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const activeSession = useMemo(
@@ -80,6 +82,46 @@ export function AICompanionScreen() {
   );
   const messages = activeSession.messages;
   const statusLabel = agentStatusLabel(runtimeStatus);
+
+  const cardTree = useMemo(() => cardTreeFromList(cards), [cards]);
+
+  const spawnedCardsByMessage = useMemo(() => {
+    const map = new Map<string, KnowledgeCard[]>();
+    for (const card of cards) {
+      const key = card.source_message_id;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(card);
+    }
+    return map;
+  }, [cards]);
+
+  function hasSpawnedCards(message: CompanionMessage): boolean {
+    const key = message.serverId ?? message.id;
+    return spawnedCardsByMessage.has(key);
+  }
+
+  function getSpawnedCards(message: CompanionMessage): KnowledgeCard[] {
+    const key = message.serverId ?? message.id;
+    return spawnedCardsByMessage.get(key) ?? [];
+  }
+
+  const allCardNodes = useMemo(() => {
+    function flatten(node: CardNode): CardNode[] {
+      return [node, ...node.children.flatMap(flatten)];
+    }
+    return cardTree.flatMap(flatten);
+  }, [cardTree]);
+
+  const cardNodeMap = useMemo(() => {
+    const map = new Map<string, CardNode>();
+    for (const node of allCardNodes) map.set(node.card_id, node);
+    return map;
+  }, [allCardNodes]);
+
+  function getCardNode(cardId: string): CardNode | undefined {
+    return cardNodeMap.get(cardId);
+  }
+
   const stashedCards = useMemo(
     () => stashedCardIds
       .map((cardId) => cards.find((card) => card.card_id === cardId))
@@ -233,25 +275,34 @@ export function AICompanionScreen() {
     selectedText: string;
     sourceMessageId: string;
     sourceMessageContent: string;
+    parentCardId?: string | null;
     keywordContext?: string;
-  }) {
-    if (isGenerating) return;
+  }): Promise<KnowledgeCard | null> {
+    if (isGenerating) return null;
     setIsGenerating(true);
     setRuntimeStatus((current) => ({ ...current, phase: 'generating_card' }));
     try {
-      const result = await generateKnowledgeCard(cardInput);
+      const result = await generateKnowledgeCard({
+        selectedText: cardInput.selectedText,
+        sourceMessageId: cardInput.sourceMessageId,
+        sourceMessageContent: cardInput.sourceMessageContent,
+        parentCardId: cardInput.parentCardId ?? null,
+        keywordContext: cardInput.keywordContext ?? null,
+      });
       setCards((current) => [...current, result.card]);
       setStashedCardIds((current) => current.filter((cardId) => cardId !== result.card.card_id));
-      setActiveCard(result.card);
+      setExpandedCardIds((current) => new Set(current).add(result.card.card_id));
       setRuntimeStatus({
         phase: 'completed',
         provider: result.provider,
         model: result.model,
         configured: true,
       });
+      return result.card;
     } catch (error) {
       setRuntimeStatus((current) => ({ ...current, phase: 'error' }));
       Alert.alert('知识卡片生成失败', errorMessage(error));
+      return null;
     } finally {
       setIsGenerating(false);
     }
@@ -266,11 +317,19 @@ export function AICompanionScreen() {
     });
   }
 
+  function toggleCardExpanded(cardId: string) {
+    setExpandedCardIds((current) => {
+      const next = new Set(current);
+      if (next.has(cardId)) next.delete(cardId);
+      else next.add(cardId);
+      return next;
+    });
+  }
+
   function startDetailConversation(card: KnowledgeCard) {
     const launch = createDetailBranch(activeSession, card);
     setSessions((current) => [...current, launch.session]);
     setActiveSessionId(launch.session.id);
-    setActiveCard(null);
     void runStream(
       launch.session.id,
       launch.requestMessages,
@@ -281,7 +340,7 @@ export function AICompanionScreen() {
   function requestLearnMore(card: KnowledgeCard) {
     Alert.alert(
       '新开一个深入会话？',
-      `将围绕“${card.title}”创建新会话，并继承当前会话中与这张卡片相关的上下文。当前会话会原样保留。`,
+      `将围绕"${card.title}"创建新会话。`,
       [
         { text: '取消', style: 'cancel' },
         { text: '新建会话', onPress: () => startDetailConversation(card) },
@@ -293,35 +352,34 @@ export function AICompanionScreen() {
     setStashedCardIds((current) => (
       current.includes(cardId) ? current : [...current, cardId]
     ));
-    setActiveCard((current) => current?.card_id === cardId ? null : current);
+    setExpandedCardIds((current) => {
+      const next = new Set(current);
+      next.delete(cardId);
+      return next;
+    });
   }
 
   function restoreCard(cardId: string) {
     const card = cards.find((item) => item.card_id === cardId);
     if (!card) return;
     setStashedCardIds((current) => current.filter((item) => item !== cardId));
-    setActiveCard(card);
+    setExpandedCardIds((current) => new Set(current).add(cardId));
   }
 
   function requestDeleteCard(cardId: string) {
     const card = cards.find((item) => item.card_id === cardId);
     if (!card) return;
-    Alert.alert(
-      '删除知识卡片？',
-      `“${card.title}”删除后无法从暂存区恢复。`,
-      [
-        { text: '取消', style: 'cancel' },
-        {
-          text: '删除',
-          style: 'destructive',
-          onPress: () => {
-            setCards((current) => current.filter((item) => item.card_id !== cardId));
-            setStashedCardIds((current) => current.filter((item) => item !== cardId));
-            setActiveCard((current) => current?.card_id === cardId ? null : current);
-          },
+    Alert.alert('删除知识卡片？', `"${card.title}"删除后无法恢复。`, [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '删除', style: 'destructive',
+        onPress: () => {
+          setCards((current) => current.filter((item) => item.card_id !== cardId));
+          setStashedCardIds((current) => current.filter((item) => item !== cardId));
+          setExpandedCardIds((current) => { const n = new Set(current); n.delete(cardId); return n; });
         },
-      ],
-    );
+      },
+    ]);
   }
 
   function returnToParentConversation() {
@@ -331,38 +389,26 @@ export function AICompanionScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={6}>
+      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={6}>
         <View style={styles.header}>
           <View>
             <Text style={styles.eyebrow}>可复用 AGENT 交互模块</Text>
             <Text style={styles.title}>AI 伴学</Text>
           </View>
           <View style={styles.providerBadge}>
-            <View style={[
-              styles.statusDot,
-              runtimeStatus.phase === 'error' && styles.errorDot,
-              isGenerating && styles.busyDot,
-            ]} />
+            <View style={[styles.statusDot, runtimeStatus.phase === 'error' && styles.errorDot, isGenerating && styles.busyDot]} />
             <Text numberOfLines={1} style={styles.providerText}>{statusLabel}</Text>
           </View>
         </View>
 
         <View style={styles.topicStrip}>
           {activeSession.parentConversationId && (
-            <Pressable
-              disabled={isGenerating}
-              onPress={returnToParentConversation}
-              style={styles.backButton}>
+            <Pressable disabled={isGenerating} onPress={returnToParentConversation} style={styles.backButton}>
               <Text style={styles.backText}>← 原会话</Text>
             </Pressable>
           )}
           <View style={styles.topicBody}>
-            <Text style={styles.topicLabel}>
-              {activeSession.parentConversationId ? '知识分支' : '当前会话'}
-            </Text>
+            <Text style={styles.topicLabel}>{activeSession.parentConversationId ? '知识分支' : '当前会话'}</Text>
             <Text numberOfLines={1} style={styles.topicText}>{activeSession.title}</Text>
           </View>
           <Pressable onPress={() => setSessionPickerVisible(true)} style={styles.sessionButton}>
@@ -377,11 +423,73 @@ export function AICompanionScreen() {
             data={messages}
             keyExtractor={(item) => item.id}
             renderItem={({ item }) => (
-              <ChatMessageBubble
-                message={item}
-                onSelectionRequest={setSelectionMessage}
-                onKeywordPress={handleMessageKeyword}
-              />
+              <View>
+                <ChatMessageBubble
+                  message={item}
+                  onSelectionRequest={setSelectionMessage}
+                  onKeywordPress={handleMessageKeyword}
+                />
+                {!item.isStreaming && hasSpawnedCards(item) && (
+                  <View style={styles.cardPreviewStrip}>
+                    {getSpawnedCards(item).map((card) => {
+                      const node = getCardNode(card.card_id);
+                      const isExpanded = expandedCardIds.has(card.card_id);
+                      return (
+                        <View key={card.card_id}>
+                          <Pressable
+                            onPress={() => toggleCardExpanded(card.card_id)}
+                            style={({ pressed }) => [styles.cardPreview, pressed && styles.cardPreviewPressed]}>
+                            <View style={styles.cardPreviewAccent} />
+                            <View style={styles.cardPreviewBody}>
+                              <Text numberOfLines={1} style={styles.cardPreviewTitle}>{card.title}</Text>
+                              <Text numberOfLines={2} style={styles.cardPreviewSummary}>{card.plain_explanation}</Text>
+                            </View>
+                            <Text style={styles.cardPreviewArrow}>{isExpanded ? '▾' : '▸'}</Text>
+                          </Pressable>
+                          {isExpanded && node && (
+                            <CompactKnowledgeCard
+                              card={card}
+                              node={node}
+                              expandedCardIds={expandedCardIds}
+                              onToggleExpand={toggleCardExpanded}
+                              onStash={stashCard}
+                              onRequestDelete={requestDeleteCard}
+                              onLearnMore={requestLearnMore}
+                              onCreateChildCard={async (parentCard, text) => {
+                                const newCard = await createCard({
+                                  selectedText: text,
+                                  sourceMessageId: parentCard.source_message_id,
+                                  sourceMessageContent: parentCard.plain_explanation,
+                                  parentCardId: parentCard.card_id,
+                                  keywordContext: text,
+                                });
+                                if (newCard) setExpandedCardIds((c) => new Set(c).add(newCard.card_id));
+                              }}
+                              inline
+                            />
+                          )}
+                          {isExpanded && node && node.children.length > 0 && (
+                            <View style={styles.childCardStrip}>
+                              {node.children.map((child) => (
+                                <Pressable
+                                  key={child.card_id}
+                                  onPress={() => toggleCardExpanded(child.card_id)}
+                                  style={({ pressed }) => [styles.cardPreview, styles.childCardPreview, pressed && styles.cardPreviewPressed]}>
+                                  <View style={styles.childCardAccent} />
+                                  <View style={styles.cardPreviewBody}>
+                                    <Text numberOfLines={1} style={styles.cardPreviewTitle}>{child.title}</Text>
+                                  </View>
+                                  <Text style={styles.cardPreviewArrow}>{expandedCardIds.has(child.card_id) ? '▾' : '▸'}</Text>
+                                </Pressable>
+                              ))}
+                            </View>
+                          )}
+                        </View>
+                      );
+                    })}
+                  </View>
+                )}
+              </View>
             )}
             contentContainerStyle={styles.messageList}
             keyboardShouldPersistTaps="handled"
@@ -399,24 +507,15 @@ export function AICompanionScreen() {
 
         <View style={styles.composer}>
           <TextInput
-            value={input}
-            onChangeText={setInput}
-            placeholder="围绕 AI 课程或实验继续提问…"
-            placeholderTextColor={palette.faint}
-            multiline
-            maxLength={2000}
-            style={styles.input}
+            value={input} onChangeText={setInput}
+            placeholder="围绕 AI 课程或实验继续提问…" placeholderTextColor={palette.faint}
+            multiline maxLength={2000} style={styles.input}
           />
           <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="发送消息"
+            accessibilityRole="button" accessibilityLabel="发送消息"
             disabled={!input.trim() || isGenerating}
             onPress={() => void submitMessage()}
-            style={({ pressed }) => [
-              styles.sendButton,
-              (!input.trim() || isGenerating) && styles.sendDisabled,
-              pressed && styles.sendPressed,
-            ]}>
+            style={({ pressed }) => [styles.sendButton, (!input.trim() || isGenerating) && styles.sendDisabled, pressed && styles.sendPressed]}>
             <Text style={styles.sendText}>→</Text>
           </Pressable>
         </View>
@@ -428,31 +527,14 @@ export function AICompanionScreen() {
         onClose={() => setSelectionMessage(null)}
         onConfirm={(message, selectedText) => {
           setSelectionMessage(null);
-          void createCard({
-            selectedText,
-            sourceMessageId: message.serverId ?? message.id,
-            sourceMessageContent: message.content,
-          });
+          void createCard({ selectedText, sourceMessageId: message.serverId ?? message.id, sourceMessageContent: message.content });
         }}
-      />
-      <CompactKnowledgeCard
-        card={activeCard}
-        onClose={() => {
-          if (activeCard) stashCard(activeCard.card_id);
-        }}
-        onLearnMore={requestLearnMore}
-        onRequestDelete={requestDeleteCard}
-        onStash={stashCard}
       />
       <SessionSwitcherModal
-        activeSessionId={activeSession.id}
-        sessions={sessions}
+        activeSessionId={activeSession.id} sessions={sessions}
         visible={sessionPickerVisible}
         onClose={() => setSessionPickerVisible(false)}
-        onSelect={(sessionId) => {
-          if (!isGenerating) setActiveSessionId(sessionId);
-          setSessionPickerVisible(false);
-        }}
+        onSelect={(sessionId) => { if (!isGenerating) setActiveSessionId(sessionId); setSessionPickerVisible(false); }}
       />
     </SafeAreaView>
   );
@@ -489,4 +571,15 @@ const styles = StyleSheet.create({
   sendDisabled: { backgroundColor: '#B8BDD3' },
   sendPressed: { transform: [{ scale: 0.94 }] },
   sendText: { color: '#FFFFFF', fontSize: 24, fontWeight: '600', marginTop: -2 },
+  cardPreviewStrip: { marginTop: -6, marginBottom: 10, paddingHorizontal: spacing.md },
+  cardPreview: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 12, marginBottom: 6, borderRadius: radii.md, backgroundColor: palette.surface, borderWidth: 1, borderColor: palette.border },
+  cardPreviewPressed: { opacity: 0.75 },
+  cardPreviewAccent: { width: 4, height: 36, borderRadius: 3, backgroundColor: palette.mint },
+  childCardAccent: { width: 4, height: 24, borderRadius: 3, backgroundColor: palette.purple },
+  cardPreviewBody: { flex: 1 },
+  cardPreviewTitle: { color: palette.ink, fontSize: 13, fontWeight: '800' },
+  cardPreviewSummary: { color: palette.muted, fontSize: 11, lineHeight: 16, marginTop: 2 },
+  cardPreviewArrow: { color: palette.muted, fontSize: 14, fontWeight: '700', paddingHorizontal: 4 },
+  childCardStrip: { marginLeft: 20, paddingLeft: 4, borderLeftWidth: 2, borderLeftColor: '#D9DDF2' },
+  childCardPreview: { paddingVertical: 7 },
 });
