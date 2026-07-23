@@ -43,7 +43,7 @@ export const inlineKeywordDraftSchema = z.object({
 }).strict();
 
 const evidenceRefSchema = z.object({
-  type: z.enum(['message', 'card', 'course', 'concept']),
+  type: z.enum(['message', 'card', 'course', 'concept', 'vision-result']),
   id: z.string(),
 }).strict();
 
@@ -52,6 +52,8 @@ export const knowledgeCardSchema = z.object({
   card_id: z.string(),
   parent_card_id: z.string().nullable(),
   source_message_id: z.string(),
+  source_type: z.enum(['message', 'vision-result']),
+  relation: z.enum(['deepen', 'associate', 'branch']),
   selected_text: z.string(),
   title: z.string(),
   plain_explanation: z.string().max(180),
@@ -70,6 +72,9 @@ export const generateKnowledgeCardResponseSchema = z.object({
   fallback_used: z.boolean(),
   card: knowledgeCardSchema,
 }).strict();
+
+export type CardRelationType = 'deepen' | 'associate' | 'branch';
+export type CardSourceType = 'message' | 'vision-result';
 
 export type KeywordItem = z.infer<typeof keywordSchema>;
 export type StudyAssistantOutput = z.infer<typeof studyAssistantOutputSchema>;
@@ -92,6 +97,7 @@ export type CompanionMessage = {
 
 export type CardNode = KnowledgeCard & {
   children: CardNode[];
+  isExpanded?: boolean;
   depth: number;
 };
 
@@ -115,6 +121,27 @@ export function cardTreeFromList(cards: KnowledgeCard[]): CardNode[] {
   }
 
   return roots;
+}
+
+export function findCardNode(tree: CardNode[], cardId: string): CardNode | null {
+  for (const node of tree) {
+    if (node.card_id === cardId) return node;
+    const found = findCardNode(node.children, cardId);
+    if (found) return found;
+  }
+  return null;
+}
+
+export function findCardSiblings(tree: CardNode[], cardId: string): CardNode[] {
+  function search(nodes: CardNode[]): CardNode[] | null {
+    for (const node of nodes) {
+      if (node.children.some((c) => c.card_id === cardId)) return node.children;
+      const result = search(node.children);
+      if (result) return result;
+    }
+    return null;
+  }
+  return search(tree) ?? [];
 }
 
 export type ConversationSession = {

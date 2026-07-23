@@ -40,7 +40,7 @@ class AICompanionService:
     ) -> AsyncIterator[tuple[str, dict]]:
         """Stream provider reasoning first, then the answer and inline keywords."""
         message_id = f"msg-ai-{uuid4().hex}"
-        model_name = (
+        model_name = request.model or (
             self._settings.resolved_deepseek_model
             if self._settings.ai_provider == "deepseek"
             else "deterministic-demo"
@@ -78,6 +78,7 @@ class AICompanionService:
                 ],
                 temperature=0.6,
                 max_tokens=3000,
+                model=request.model,
             )
             async for chunk in provider.stream(provider_request):
                 if chunk.reasoning_content:
@@ -185,11 +186,32 @@ class AICompanionService:
         self,
         request: GenerateKnowledgeCardRequest,
     ) -> GenerateKnowledgeCardResponse:
+        direction_hints = {
+            "deepen": (
+                "卡片方向：深入理解。请围绕选中文本的关键概念向下深挖，"
+                "说明原理、给一个例子、提醒一个常见误区。"
+            ),
+            "associate": (
+                "卡片方向：发散关联。请把选中文本与相邻概念横向对比，"
+                "说明它们的关系、异同点、以及何时用哪个。"
+            ),
+            "branch": (
+                "卡片方向：分支探索。请从选中文本出发另辟一条理解路径，"
+                "保留来源对话的核心目标，但换一个角度重新解释。"
+            ),
+        }
+        hint = direction_hints.get(request.relation, direction_hints["deepen"])
         prompt = (
-            "请把下面的选中文本制作成适合移动端学习的知识卡片。\n"
+            f"{hint}\n"
+            f"请把下面的选中文本制作成适合移动端学习的知识卡片。\n"
             f"选中文本：{request.selected_text}\n"
             f"来源消息：{request.source_message_content}\n"
         )
+        if request.source_type == "vision-result":
+            prompt += (
+                "来源类型：用户主动拍摄并选择的识物结果。"
+                "请把物体识别结果与计算机视觉、分类和置信度联系起来。\n"
+            )
         if request.keyword_context:
             prompt += f"触发关键词：{request.keyword_context}\n"
 
@@ -224,9 +246,13 @@ class AICompanionService:
             card_id=card_id,
             parent_card_id=request.parent_card_id,
             source_message_id=request.source_message_id,
+            source_type=request.source_type,
+            relation=request.relation,
             selected_text=request.selected_text,
             keywords=_keyword_items(draft.keywords, card_id),
-            evidence_refs=[EvidenceRef(type="message", id=request.source_message_id)],
+            evidence_refs=[
+                EvidenceRef(type=request.source_type, id=request.source_message_id)
+            ],
         )
         return GenerateKnowledgeCardResponse(
             provider=completion.provider,

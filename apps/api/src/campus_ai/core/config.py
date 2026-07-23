@@ -73,6 +73,14 @@ class Settings(BaseSettings):
     deepseek_timeout_seconds: float = 90.0
     deepseek_reasoning_effort: Literal["low", "medium", "high"] = "high"
 
+    vision_provider: Literal["mock", "openai"] = "mock"
+    vision_openai_api_key: str | None = None
+    vision_openai_base_url: str = (
+        "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    )
+    vision_openai_model: str = "qwen3.7-plus"
+    vision_openai_timeout_seconds: float = 60.0
+
     @property
     def external_deepseek_values(self) -> dict[str, str]:
         return _read_external_env(self.deepseek_env_file)
@@ -147,6 +155,15 @@ class Settings(BaseSettings):
             and self.resolved_deepseek_base_url
             and self.resolved_deepseek_pro_model
             and self.resolved_deepseek_flash_model
+        )
+
+    @computed_field
+    @property
+    def vision_configured(self) -> bool:
+        return self.vision_provider == "mock" or bool(
+            self.vision_openai_api_key
+            and self.vision_openai_base_url
+            and self.vision_openai_model
         )
 
     @computed_field

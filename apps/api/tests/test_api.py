@@ -86,12 +86,15 @@ async def test_structured_study_chat_and_knowledge_card() -> None:
                 "source_message_content": chat_payload["output"]["answer_markdown"],
                 "parent_card_id": None,
                 "keyword_context": "Middleware",
+                "relation": "associate",
             },
         )
         assert card.status_code == 200
         card_payload = card.json()["card"]
         assert card_payload["selected_text"] == "Middleware"
         assert card_payload["source_message_id"] == chat_payload["message_id"]
+        assert card_payload["source_type"] == "message"
+        assert card_payload["relation"] == "associate"
         assert len(card_payload["reasoning_steps"]) >= 2
         assert len(card_payload["keywords"]) == 3
 

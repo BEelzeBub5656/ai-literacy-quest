@@ -5,6 +5,8 @@ import { z } from 'zod';
 import {
   generateKnowledgeCardResponseSchema,
   inlineKeywordDraftSchema,
+  type CardRelationType,
+  type CardSourceType,
   type CompanionMessage,
   type InlineKeywordDraft,
 } from './contracts';
@@ -18,7 +20,7 @@ const aiStatusSchema = z.object({
 export type AIServiceStatus = z.infer<typeof aiStatusSchema>;
 
 const fallbackHost = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
-const apiBase = process.env.EXPO_PUBLIC_API_BASE_URL ?? `http://${fallbackHost}:8000/api/v1`;
+const apiBase = process.env.EXPO_PUBLIC_API_BASE_URL ?? `http://${fallbackHost}:8010/api/v1`;
 
 const metaSchema = z.object({
   conversation_id: z.string(),
@@ -149,6 +151,8 @@ type GenerateCardInput = {
   sourceMessageContent: string;
   parentCardId?: string | null;
   keywordContext?: string | null;
+  relation?: CardRelationType;
+  sourceType?: CardSourceType;
 };
 
 export async function generateKnowledgeCard(input: GenerateCardInput) {
@@ -160,6 +164,8 @@ export async function generateKnowledgeCard(input: GenerateCardInput) {
       source_message_content: input.sourceMessageContent,
       parent_card_id: input.parentCardId ?? null,
       keyword_context: input.keywordContext ?? null,
+      relation: input.relation ?? 'deepen',
+      source_type: input.sourceType ?? 'message',
     }),
   });
   return generateKnowledgeCardResponseSchema.parse(payload);

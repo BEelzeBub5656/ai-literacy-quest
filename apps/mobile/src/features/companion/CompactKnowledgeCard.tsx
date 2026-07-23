@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, {
   runOnJS,
   useAnimatedStyle,
@@ -14,6 +14,7 @@ import { palette, radii, shadows, spacing } from '@/src/ui/theme';
 
 type Props = {
   card: KnowledgeCard | null;
+  modelLabel?: string;
   node?: CardNode;
   expandedCardIds?: Set<string>;
   onClose?: () => void;
@@ -26,43 +27,106 @@ type Props = {
 };
 
 const SWIPE_THRESHOLD_RATIO = 0.22;
+const CARD_ESTIMATED_HEIGHT = 300;
+const EDGE_GUARD = 28;
+const MIN_CARD_SCALE = 0.65;
+const MAX_CARD_SCALE = 1.5;
 
 export function CompactKnowledgeCard({
-  card, node, expandedCardIds, onClose, onToggleExpand,
-  onLearnMore, onStash, onRequestDelete, onCreateChildCard, inline = false,
+  card,
+  modelLabel,
+  node,
+  expandedCardIds,
+  onClose,
+  onToggleExpand,
+  onLearnMore,
+  onStash,
+  onRequestDelete,
+  onCreateChildCard,
+  inline = false,
 }: Props) {
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const offsetX = useSharedValue(0);
+  const offsetY = useSharedValue(0);
+  const startX = useSharedValue(0);
+  const startY = useSharedValue(0);
+  const actionX = useSharedValue(0);
+  const cardScale = useSharedValue(1);
+  const startScale = useSharedValue(1);
   const cardId = card?.card_id ?? '';
   const [childInput, setChildInput] = useState('');
+  const maxRestingX = Math.max(0, width / 2 - EDGE_GUARD);
+  const maxRestingY = Math.max(0, (height - CARD_ESTIMATED_HEIGHT) / 2 - EDGE_GUARD);
 
   if (!card) return null;
 
-  const pan = inline ? null : Gesture.Pan()
-    .enabled(Boolean(cardId))
-    .activeOffsetX([-10, 10]).failOffsetY([-18, 18])
-    .onUpdate((event) => { offsetX.value = event.translationX; })
-    .onEnd(() => {
-      const threshold = width * SWIPE_THRESHOLD_RATIO;
-      if (offsetX.value < -threshold) {
-        offsetX.value = withTiming(-width, { duration: 180 }, (finished) => {
-          if (finished) runOnJS(onStash)(cardId);
+  const pan = inline
+    ? null
+    : Gesture.Pan()
+        .enabled(Boolean(cardId))
+        .maxPointers(1)
+        .minDistance(4)
+        .onBegin(() => {
+          startX.value = offsetX.value;
+          startY.value = offsetY.value;
+          actionX.value = 0;
+        })
+        .onUpdate((event) => {
+          actionX.value = event.translationX;
+          offsetX.value = Math.max(
+            -maxRestingX,
+            Math.min(maxRestingX, startX.value + event.translationX),
+          );
+          offsetY.value = Math.max(
+            -maxRestingY,
+            Math.min(maxRestingY, startY.value + event.translationY),
+          );
+        })
+        .onEnd(() => {
+          const threshold = width * SWIPE_THRESHOLD_RATIO;
+          if (actionX.value < -threshold) {
+            offsetX.value = withTiming(-width, { duration: 180 }, (finished) => {
+              if (finished) runOnJS(onStash)(cardId);
+            });
+            return;
+          }
+          if (actionX.value > threshold) {
+            offsetX.value = withSpring(startX.value, { damping: 18, stiffness: 190 });
+            actionX.value = withSpring(0);
+            runOnJS(onRequestDelete)(cardId);
+            return;
+          }
+          startX.value = offsetX.value;
+          startY.value = offsetY.value;
+          actionX.value = withSpring(0, { damping: 18, stiffness: 190 });
         });
-        return;
-      }
-      if (offsetX.value > threshold) {
-        offsetX.value = withSpring(0);
-        runOnJS(onRequestDelete)(cardId);
-        return;
-      }
-      offsetX.value = withSpring(0);
-    });
+
+  const pinch = inline
+    ? null
+    : Gesture.Pinch()
+        .enabled(Boolean(cardId))
+        .onBegin(() => {
+          startScale.value = cardScale.value;
+        })
+        .onUpdate((event) => {
+          cardScale.value = Math.max(
+            MIN_CARD_SCALE,
+            Math.min(MAX_CARD_SCALE, startScale.value * event.scale),
+          );
+        })
+        .onEnd(() => {
+          startScale.value = cardScale.value;
+        });
+
+  const cardGesture = inline ? null : Gesture.Simultaneous(pan!, pinch!);
 
   const animatedStyle = useAnimatedStyle(() => ({
-    opacity: Math.max(0.72, 1 - Math.abs(offsetX.value) / width),
+    opacity: Math.max(0.72, 1 - Math.abs(actionX.value) / width),
     transform: [
       { translateX: offsetX.value },
-      { rotate: `${Math.max(-2.5, Math.min(2.5, offsetX.value / 120))}deg` },
+      { translateY: offsetY.value },
+      { scale: cardScale.value },
+      { rotate: `${Math.max(-2.5, Math.min(2.5, actionX.value / 120))}deg` },
     ],
   }));
 
@@ -79,11 +143,30 @@ export function CompactKnowledgeCard({
 
       <View style={styles.header}>
         <Text style={styles.badge}>知识卡片</Text>
-        {!inline && <Text style={styles.dragHint}>← 暂存 · 删除 →</Text>}
+        {!inline && (
+          <Text numberOfLines={1} style={styles.dragHint}>
+            {modelLabel ? `${modelLabel} · 双指缩放` : '拖动位置 · 双指缩放'}
+          </Text>
+        )}
         <View style={{ flex: 1 }} />
-        {inline && <Pressable onPress={() => onStash(card.card_id)} hitSlop={8} style={styles.inlineAction}><Text style={styles.inlineActionText}>暂存</Text></Pressable>}
-        {inline && onClose && <Pressable hitSlop={12} onPress={onClose}><Text style={styles.close}>▴</Text></Pressable>}
-        {!inline && onClose && <Pressable hitSlop={12} onPress={onClose}><Text style={styles.close}>×</Text></Pressable>}
+        {inline && onStash && (
+          <Pressable
+            onPress={() => onStash(card.card_id)}
+            hitSlop={8}
+            style={styles.inlineAction}>
+            <Text style={styles.inlineActionText}>暂存</Text>
+          </Pressable>
+        )}
+        {inline && onClose && (
+          <Pressable accessibilityLabel="折叠卡片" hitSlop={12} onPress={onClose}>
+            <Text style={styles.close}>▴</Text>
+          </Pressable>
+        )}
+        {!inline && onClose && (
+          <Pressable accessibilityLabel="关闭" hitSlop={12} onPress={onClose}>
+            <Text style={styles.close}>×</Text>
+          </Pressable>
+        )}
       </View>
 
       <Text numberOfLines={inline ? undefined : 1} style={styles.title}>{card.title}</Text>
@@ -104,9 +187,14 @@ export function CompactKnowledgeCard({
         <Pressable onPress={() => onStash(card.card_id)} style={styles.secondaryButton}>
           <Text style={styles.secondaryText}>暂存</Text>
         </Pressable>
-        {onLearnMore && (
-          <Pressable onPress={() => onLearnMore(card)} style={[styles.primaryButton, inline && { flex: 1 }]}>
-            <Text style={styles.primaryText}>{inline ? '深入会话' : '详细了解'}</Text>
+        {onLearnMore && !inline && (
+          <Pressable onPress={() => onLearnMore(card)} style={styles.primaryButton}>
+            <Text style={styles.primaryText}>详细了解</Text>
+          </Pressable>
+        )}
+        {inline && (
+          <Pressable onPress={() => onLearnMore?.(card)} style={[styles.primaryButton, { flex: 1 }]}>
+            <Text style={styles.primaryText}>深入会话</Text>
           </Pressable>
         )}
       </View>
@@ -116,13 +204,22 @@ export function CompactKnowledgeCard({
           <Text style={styles.childComposerLabel}>对这张卡片继续追问</Text>
           <View style={styles.childComposerRow}>
             <TextInput
-              value={childInput} onChangeText={setChildInput}
-              placeholder="输入关键词生成子卡片…" placeholderTextColor={palette.faint}
+              value={childInput}
+              onChangeText={setChildInput}
+              placeholder="输入关键词生成子卡片…"
+              placeholderTextColor={palette.faint}
               style={styles.childInput}
-              onSubmitEditing={submitChildCard} returnKeyType="send"
+              onSubmitEditing={submitChildCard}
+              returnKeyType="send"
             />
-            <Pressable disabled={!childInput.trim()} onPress={submitChildCard}
-              style={({ pressed }) => [styles.childSendButton, !childInput.trim() && styles.childSendDisabled, pressed && { opacity: 0.7 }]}>
+            <Pressable
+              disabled={!childInput.trim()}
+              onPress={submitChildCard}
+              style={({ pressed }) => [
+                styles.childSendButton,
+                !childInput.trim() && styles.childSendDisabled,
+                pressed && { opacity: 0.7 },
+              ]}>
               <Text style={styles.childSendText}>+</Text>
             </Pressable>
           </View>
@@ -131,7 +228,9 @@ export function CompactKnowledgeCard({
 
       {inline && node && node.children.length > 0 && (
         <View style={styles.childList}>
-          <Text style={styles.childListLabel}>已派生 {node.children.length} 张子卡片</Text>
+          <Text style={styles.childListLabel}>
+            已派生 {node.children.length} 张子卡片
+          </Text>
         </View>
       )}
     </View>
@@ -139,24 +238,59 @@ export function CompactKnowledgeCard({
 
   if (inline) return content;
 
+  // Modal mode
   return (
-    <Modal animationType="fade" onRequestClose={onClose} statusBarTranslucent transparent visible={card !== null}>
-      <View style={styles.backdrop}>
-        <Pressable accessibilityLabel="关闭知识卡片" onPress={onClose} style={StyleSheet.absoluteFill} />
-        <View pointerEvents="none" style={[styles.swipeCue, styles.stashCue]}><Text style={styles.stashCueText}>暂存</Text></View>
-        <View pointerEvents="none" style={[styles.swipeCue, styles.deleteCue]}><Text style={styles.deleteCueText}>删除</Text></View>
-        <GestureDetector gesture={pan!}>
-          <Animated.View accessibilityViewIsModal style={animatedStyle}>{content}</Animated.View>
-        </GestureDetector>
-      </View>
+    <Modal
+      animationType="fade"
+      onRequestClose={onClose}
+      statusBarTranslucent
+      transparent
+      visible={card !== null}>
+      <GestureHandlerRootView style={styles.modalRoot}>
+        <View style={styles.backdrop}>
+          <Pressable accessibilityLabel="关闭知识卡片" onPress={onClose} style={StyleSheet.absoluteFill} />
+          <View pointerEvents="none" style={[styles.swipeCue, styles.stashCue]}>
+            <Text style={styles.stashCueText}>← 暂存</Text>
+          </View>
+          <View pointerEvents="none" style={[styles.swipeCue, styles.deleteCue]}>
+            <Text style={styles.deleteCueText}>删除 →</Text>
+          </View>
+          <GestureDetector gesture={cardGesture!}>
+            <Animated.View accessibilityViewIsModal style={animatedStyle}>
+              {content}
+            </Animated.View>
+          </GestureDetector>
+        </View>
+      </GestureHandlerRootView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24, backgroundColor: 'rgba(18,24,43,0.35)' },
-  card: { width: '100%', maxWidth: 360, padding: spacing.md, borderRadius: radii.lg, borderWidth: 1, borderColor: '#D9DDF2', backgroundColor: palette.surface, ...shadows.card },
-  cardInline: { maxWidth: '100%', marginTop: 0, marginBottom: 4 },
+  modalRoot: { flex: 1, backgroundColor: 'transparent' },
+  backdrop: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+    backgroundColor: 'rgba(18,24,43,0.35)',
+  },
+  card: {
+    width: '100%',
+    maxWidth: 360,
+    padding: spacing.md,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: '#D9DDF2',
+    backgroundColor: palette.surface,
+    ...shadows.card,
+  },
+  cardInline: {
+    maxWidth: '100%',
+    marginTop: 0,
+    marginBottom: 4,
+    ...shadows.card,
+  },
   dragHandle: { width: 38, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: 9, backgroundColor: palette.border },
   header: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   badge: { color: '#237D68', fontSize: 10, fontWeight: '800', backgroundColor: palette.mintSoft, paddingHorizontal: 9, paddingVertical: 4, borderRadius: 99 },
@@ -180,13 +314,40 @@ const styles = StyleSheet.create({
   deleteCue: { right: 18, backgroundColor: '#FCE8EC' },
   stashCueText: { color: '#237D68', fontSize: 11, fontWeight: '800' },
   deleteCueText: { color: palette.danger, fontSize: 11, fontWeight: '800' },
-  childComposer: { marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: palette.border },
+  childComposer: {
+    marginTop: 14,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: palette.border,
+  },
   childComposerLabel: { color: palette.purple, fontSize: 10, fontWeight: '800', marginBottom: 8 },
   childComposerRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
-  childInput: { flex: 1, paddingHorizontal: 12, paddingVertical: 10, borderRadius: radii.md, backgroundColor: palette.background, color: palette.ink, fontSize: 13, borderWidth: 1, borderColor: palette.border },
-  childSendButton: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: palette.purple },
+  childInput: {
+    flex: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: radii.md,
+    backgroundColor: palette.background,
+    color: palette.ink,
+    fontSize: 13,
+    borderWidth: 1,
+    borderColor: palette.border,
+  },
+  childSendButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: palette.purple,
+  },
   childSendDisabled: { backgroundColor: '#B8BDD3' },
   childSendText: { color: '#FFFFFF', fontSize: 20, fontWeight: '700', marginTop: -1 },
-  childList: { marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: palette.border },
+  childList: {
+    marginTop: 10,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: palette.border,
+  },
   childListLabel: { color: palette.muted, fontSize: 10, fontWeight: '700' },
 });

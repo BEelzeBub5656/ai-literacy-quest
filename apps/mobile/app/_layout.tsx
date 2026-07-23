@@ -6,6 +6,8 @@ import 'react-native-reanimated';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { useColorScheme } from '@/components/useColorScheme';
+import { FloatingToolProvider } from '@/src/features/floating-tool';
+import { KnowledgeWorkspaceProvider } from '@/src/features/knowledge-workspace';
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -49,10 +51,15 @@ function RootLayoutNav() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-        <Stack>
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
-        </Stack>
+        <KnowledgeWorkspaceProvider>
+          <FloatingToolProvider>
+            <Stack>
+              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+              <Stack.Screen name="knowledge-graph" options={{ headerShown: false }} />
+              <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
+            </Stack>
+          </FloatingToolProvider>
+        </KnowledgeWorkspaceProvider>
       </ThemeProvider>
     </GestureHandlerRootView>
   );

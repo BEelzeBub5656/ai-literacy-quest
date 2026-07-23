@@ -71,9 +71,11 @@ export function createDetailBranch(
     id: `message-user-${Date.now()}`,
     role: 'user',
     content: [
-      `请详细讲解知识卡片“${card.title}”。`,
-      `简要结论：${card.plain_explanation}`,
-      `请结合原会话语境，先说明核心原理，再给一个容易理解的例子，最后提醒一个常见误区。`,
+      `我想详细了解知识点“${card.title}”。`,
+      `触发内容：${card.selected_text}`,
+      `卡片结论：${card.plain_explanation}`,
+      `关键要点：${card.key_points.slice(0, 2).join('；')}`,
+      '请结合随会话带入的来源上下文，先说明核心原理，再给一个容易理解的例子，最后提醒一个常见误区。',
     ].join('\n'),
   };
   const assistantMessageId = `message-stream-${Date.now()}`;
@@ -88,7 +90,7 @@ export function createDetailBranch(
   const contextMessages = relevantContextFor(sourceSession, card);
   const session: ConversationSession = {
     id: sessionId,
-    title: `深入了解：${card.title}`,
+    title: `知识分支：${card.title}`,
     messages: [userMessage, assistantMessage],
     contextMessages,
     parentConversationId: sourceSession.id,
