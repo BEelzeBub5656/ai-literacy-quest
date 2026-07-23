@@ -62,7 +62,7 @@ export const RELATION_ORDER: RelationType[] = [
 /** 根据重要度（1-3）返回节点半径（图谱坐标单位）。 */
 export function nodeRadius(importance: number): number {
   const clamped = Math.max(1, Math.min(3, importance));
-  return 18 + clamped * 6; // 24 / 30 / 36
+  return 10 + clamped * 4; // 14 / 18 / 22
 }
 
 /** 中性边颜色。 */

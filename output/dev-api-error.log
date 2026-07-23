@@ -9,3 +9,22 @@ INFO:     Shutting down
 INFO:     Waiting for application shutdown.
 INFO:     Application shutdown complete.
 INFO:     Finished server process [96000]
+WARNING:  WatchFiles detected changes in 'src\campus_ai\providers\mock.py'. Reloading...
+INFO:     Started server process [96656]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [96656]
+INFO:     Started server process [102144]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'tests\test_api.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [102144]
+INFO:     Started server process [98720]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.

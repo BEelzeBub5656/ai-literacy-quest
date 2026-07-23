@@ -76,11 +76,24 @@ export function FloatingBall() {
         runOnJS(activateBall)();
         return;
       }
-      // 吸附到最近的左右竖边，球心对齐边缘 → 藏一半
-      const cx = ballX.value + BALL_SIZE / 2;
-      const targetX = cx < screenW / 2 ? -BALL_SIZE / 2 : screenW - BALL_SIZE / 2;
-      ballX.value = withSpring(targetX, { damping: 20, stiffness: 200 });
+      // 仅当松手时球已有一部分超出边缘才吸附藏一半；否则停在松手位置
+      const releaseX = ballX.value;
+      if (releaseX < 0) {
+        ballX.value = withSpring(-BALL_SIZE / 2, { damping: 20, stiffness: 200 });
+      } else if (releaseX > screenW - BALL_SIZE) {
+        ballX.value = withSpring(screenW - BALL_SIZE / 2, { damping: 20, stiffness: 200 });
+      }
+      // 其余：保持松手位置（ballY 已在 onUpdate 被 clamp 到安全区）
     });
+
+  // 独立 Tap 手势：纯点击时 Pan 不会进入 ACTIVE 态、onEnd 不触发，
+  // 故用 Tap 可靠识别点击；与 Pan 互斥组合（拖拽时 Pan 激活则 Tap 取消）
+  const tap = Gesture.Tap().onEnd(() => {
+    'worklet';
+    runOnJS(activateBall)();
+  });
+
+  const composed = Gesture.Exclusive(pan, tap);
 
   const ballStyle = useAnimatedStyle(() => ({
     transform: [
@@ -126,7 +139,7 @@ export function FloatingBall() {
           </Pressable>
         ))}
       </Animated.View>
-      <GestureDetector gesture={pan}>
+      <GestureDetector gesture={composed}>
         <Animated.View
           accessibilityRole="button"
           accessibilityLabel={expanded ? '收起工具' : '打开学习工具'}

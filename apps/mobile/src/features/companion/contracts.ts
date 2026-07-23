@@ -85,7 +85,7 @@ export const knowledgeCardSchema = z.object({
   reasoning_summary: z.string(),
   reasoning_steps: z.array(reasoningStepSchema).min(1).max(3),
   key_points: z.array(z.string()).min(2).max(3),
-  keywords: z.array(keywordSchema).min(2).max(4),
+  keywords: z.array(keywordSchema).max(4),
   evidence_refs: z.array(evidenceRefSchema),
   assumptions: z.array(z.string()).max(5),
   uncertainties: z.array(z.string()).max(5),
@@ -106,7 +106,20 @@ export type StudyAssistantOutput = z.infer<typeof studyAssistantOutputSchema>;
 export type StudyChatResponse = z.infer<typeof studyChatResponseSchema>;
 export type KnowledgeCard = z.infer<typeof knowledgeCardSchema>;
 export type ExplanationPreview = z.infer<typeof explanationPreviewSchema>;
-export type KnowledgeArtifact = KnowledgeCard;
+export type SourceRef = z.infer<typeof evidenceRefSchema>;
+export type KnowledgeArtifact = {
+  id: string;
+  parentArtifactId: string | null;
+  sourceMessageId: string;
+  sourceType: CardSourceType;
+  relation: CardRelationType;
+  selectedText: string;
+  title: string;
+  summary: string;
+  keyPoints: string[];
+  keywords: InlineKeywordItem[];
+  evidenceRefs: SourceRef[];
+};
 export type InlineKeywordDraft = z.infer<typeof inlineKeywordDraftSchema>;
 export type InlineKeywordItem = InlineKeywordDraft & { id: string };
 export type AnnotateTextResponse = z.infer<typeof annotateTextResponseSchema>;
@@ -125,24 +138,45 @@ export function promoteExplanationPreview(
 ): KnowledgeArtifact {
   const inlineKeywords = explanationPreviewKeywords(preview);
   return {
-    schema_version: '1.0',
-    card_id: preview.preview_id.replace(/^preview-/, 'card-'),
-    parent_card_id: preview.parent_card_id,
-    source_message_id: preview.source_message_id,
-    source_type: preview.source_type,
+    id: preview.preview_id.replace(/^preview-/, 'card-'),
+    parentArtifactId: preview.parent_card_id,
+    sourceMessageId: preview.source_message_id,
+    sourceType: preview.source_type,
     relation: preview.relation,
-    selected_text: preview.selected_text,
+    selectedText: preview.selected_text,
     title: preview.title,
-    plain_explanation: preview.explanation,
+    summary: preview.explanation,
+    keyPoints: [
+      `核心概念：${preview.selected_text}`,
+      inlineKeywords.length > 0
+        ? `可继续探索：${inlineKeywords.slice(0, 3).map((keyword) => keyword.text).join('、')}`
+        : '解释内容已与来源消息关联。',
+    ],
+    keywords: inlineKeywords,
+    evidenceRefs: preview.evidence_refs,
+  };
+}
+
+export function knowledgeArtifactToCard(artifact: KnowledgeArtifact): KnowledgeCard {
+  return {
+    schema_version: '1.0',
+    card_id: artifact.id,
+    parent_card_id: artifact.parentArtifactId,
+    source_message_id: artifact.sourceMessageId,
+    source_type: artifact.sourceType,
+    relation: artifact.relation,
+    selected_text: artifact.selectedText,
+    title: artifact.title,
+    plain_explanation: artifact.summary,
     reasoning_summary: '由用户确认的即时解释升级为知识成果。',
     reasoning_steps: [{
       step: 1,
       title: '保留来源',
       explanation: '成果内容沿用已阅读的即时解释，不再次改写。',
-      based_on: [`${preview.source_type}:${preview.source_message_id}`],
+      based_on: [`${artifact.sourceType}:${artifact.sourceMessageId}`],
     }],
-    key_points: [],
-    keywords: inlineKeywords.map((keyword) => ({
+    key_points: artifact.keyPoints,
+    keywords: artifact.keywords.slice(0, 4).map((keyword) => ({
       id: keyword.id,
       text: keyword.text,
       normalized_text: keyword.normalized_text,
@@ -150,7 +184,7 @@ export function promoteExplanationPreview(
       selection_reason: '来自用户确认保存的即时解释。',
       confidence: keyword.importance === 3 ? 0.95 : keyword.importance === 2 ? 0.86 : 0.75,
     })),
-    evidence_refs: preview.evidence_refs,
+    evidence_refs: artifact.evidenceRefs,
     assumptions: [],
     uncertainties: [],
   };

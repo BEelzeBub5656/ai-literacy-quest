@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   Alert,
   FlatList,
+  type GestureResponderEvent,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -16,9 +17,15 @@ import { router } from 'expo-router';
 import { ZodError } from 'zod';
 
 import { agentStatusLabel } from './agentStatus';
-import { generateKnowledgeCard, getAIServiceStatus, streamStudyChat } from './api';
+import {
+  generateExplanationPreview,
+  generateKnowledgeCard,
+  getAIServiceStatus,
+  streamStudyChat,
+} from './api';
 import { ChatMessageBubble } from './ChatMessageBubble';
 import { CompactKnowledgeCard } from './CompactKnowledgeCard';
+import { ExplanationPreviewCard } from './ExplanationPreviewCard';
 import {
   createDetailBranch,
   createInitialSession,
@@ -32,10 +39,15 @@ import type {
   CardSourceType,
   CompanionMessage,
   ConversationSession,
+  ExplanationPreview,
   InlineKeywordItem,
   KnowledgeCard,
 } from './contracts';
-import { cardTreeFromList } from './contracts';
+import {
+  cardTreeFromList,
+  knowledgeArtifactToCard,
+  promoteExplanationPreview,
+} from './contracts';
 import { SessionSwitcherModal } from './SessionSwitcherModal';
 import { StashedCardRail } from './StashedCardRail';
 import { TextSelectionModal } from './TextSelectionModal';
@@ -48,15 +60,21 @@ const welcomeMessage: CompanionMessage = {
   content: '你好，我是你的 AI 通识伴学伙伴。可以陪你理解课程、分析实验结果，也可以围绕回答中的重点继续探索。',
 };
 
-type TemporaryCardEntry = {
-  card: KnowledgeCard;
+type TemporaryPreviewEntry = {
+  preview: ExplanationPreview;
   modelLabel: string;
   sourceMessageContent: string;
 };
 
-type TemporaryKnowledgeCard = TemporaryCardEntry & {
+type TemporaryExplanationPreview = TemporaryPreviewEntry & {
   sourceSessionId: string;
-  ancestors: TemporaryCardEntry[];
+  ancestors: TemporaryPreviewEntry[];
+};
+
+type PersistedCardEntry = {
+  card: KnowledgeCard;
+  modelLabel: string;
+  sourceMessageContent: string;
 };
 
 const SESSION_STORAGE_KEY = '@campus-ai:companion-sessions:v1';
@@ -139,13 +157,16 @@ export function AICompanionScreen() {
   const [runtimeStatus, setRuntimeStatus] = useState<AgentRuntimeStatus>({ phase: 'checking' });
   const [selectionMessage, setSelectionMessage] = useState<CompanionMessage | null>(null);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
-  const [temporaryCard, setTemporaryCard] = useState<TemporaryKnowledgeCard | null>(null);
+  const [temporaryPreview, setTemporaryPreview] = useState<TemporaryExplanationPreview | null>(null);
+  const [previewScale, setPreviewScale] = useState(1);
   const [cardModels, setCardModels] = useState<Record<string, string>>({});
   const [expandedCardIds, setExpandedCardIds] = useState<Set<string>>(new Set());
   const [sessionPickerVisible, setSessionPickerVisible] = useState(false);
   const listRef = useRef<FlatList<any>>(null);
   const abortRef = useRef<AbortController | null>(null);
   const cardGenerationRef = useRef(false);
+  const previewTouchStartedOnCardRef = useRef(false);
+  const backgroundTouchRef = useRef({ x: 0, y: 0, moved: false });
 
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeSessionId) ?? sessions[0],
@@ -154,7 +175,6 @@ export function AICompanionScreen() {
   const messages = activeSession.messages;
   const statusLabel = agentStatusLabel(runtimeStatus);
   const persistedActiveCard = cards.find((card) => card.card_id === activeCardId) ?? null;
-  const activeCard = temporaryCard?.card ?? persistedActiveCard;
 
   const cardTree = useMemo(() => cardTreeFromList(cards), [cards]);
 
@@ -384,9 +404,6 @@ export function AICompanionScreen() {
     keywordContext?: string;
     relation?: CardRelationType;
     sourceType?: CardSourceType;
-    persist?: boolean;
-    sourceSessionId?: string;
-    temporaryAncestors?: TemporaryCardEntry[];
   }): Promise<KnowledgeCard | null> {
     if (cardGenerationRef.current) return null;
     cardGenerationRef.current = true;
@@ -401,20 +418,9 @@ export function AICompanionScreen() {
         relation: cardInput.relation,
         sourceType: cardInput.sourceType,
       });
-      if (cardInput.persist === false) {
-        setTemporaryCard({
-          card: result.card,
-          modelLabel: result.model,
-          sourceMessageContent: cardInput.sourceMessageContent,
-          sourceSessionId: cardInput.sourceSessionId ?? activeSession.id,
-          ancestors: cardInput.temporaryAncestors ?? [],
-        });
-        setActiveCardId(null);
-      } else {
-        persistCard(result.card, { sourceMessageContent: cardInput.sourceMessageContent });
-        setTemporaryCard(null);
-        setActiveCardId(result.card.card_id);
-      }
+      persistCard(result.card, { sourceMessageContent: cardInput.sourceMessageContent });
+      setTemporaryPreview(null);
+      setActiveCardId(result.card.card_id);
       setCardModels((current) => ({ ...current, [result.card.card_id]: result.model }));
       return result.card;
     } catch (error) {
@@ -426,45 +432,103 @@ export function AICompanionScreen() {
     }
   }
 
+  async function createPreview(previewInput: {
+    selectedText: string;
+    sourceMessageId: string;
+    sourceMessageContent: string;
+    parentPreviewId?: string | null;
+    parentCardId?: string | null;
+    keywordContext?: string;
+    relation?: CardRelationType;
+    sourceType?: CardSourceType;
+    sourceSessionId?: string;
+    temporaryAncestors?: TemporaryPreviewEntry[];
+  }): Promise<ExplanationPreview | null> {
+    if (cardGenerationRef.current) return null;
+    cardGenerationRef.current = true;
+    setIsCardGenerating(true);
+    try {
+      const result = await generateExplanationPreview({
+        selectedText: previewInput.selectedText,
+        sourceMessageId: previewInput.sourceMessageId,
+        sourceMessageContent: previewInput.sourceMessageContent,
+        parentPreviewId: previewInput.parentPreviewId ?? null,
+        parentCardId: previewInput.parentCardId ?? null,
+        keywordContext: previewInput.keywordContext ?? null,
+        relation: previewInput.relation,
+        sourceType: previewInput.sourceType,
+      });
+      setTemporaryPreview({
+        preview: result.preview,
+        modelLabel: result.model,
+        sourceMessageContent: previewInput.sourceMessageContent,
+        sourceSessionId: previewInput.sourceSessionId ?? activeSession.id,
+        ancestors: previewInput.temporaryAncestors ?? [],
+      });
+      setPreviewScale(1);
+      setActiveCardId(null);
+      return result.preview;
+    } catch (error) {
+      Alert.alert('即时解释生成失败', errorMessage(error));
+      return null;
+    } finally {
+      cardGenerationRef.current = false;
+      setIsCardGenerating(false);
+    }
+  }
+
   function handleMessageKeyword(message: CompanionMessage, keyword: InlineKeywordItem) {
-    void createCard({
+    void createPreview({
       selectedText: keyword.text,
       sourceMessageId: message.serverId ?? message.id,
       sourceMessageContent: message.content,
       parentCardId: activeSession.sourceCardId ?? null,
       keywordContext: keyword.text,
       relation: 'deepen',
-      persist: false,
       sourceSessionId: activeSession.id,
       temporaryAncestors: [],
     });
   }
 
-  function handleCardKeyword(card: KnowledgeCard, keyword: InlineKeywordItem) {
-    const sourceMessageContent = knowledgeCardContent(card);
-    const isCurrentTemporary = temporaryCard?.card.card_id === card.card_id;
-    const ancestors = isCurrentTemporary
+  function handlePreviewKeyword(
+    preview: ExplanationPreview,
+    keyword: InlineKeywordItem,
+  ) {
+    const sourceMessageContent = preview.explanation;
+    const ancestors = temporaryPreview
       ? [
-          ...temporaryCard.ancestors,
+          ...temporaryPreview.ancestors,
           {
-            card: temporaryCard.card,
-            modelLabel: temporaryCard.modelLabel,
-            sourceMessageContent: temporaryCard.sourceMessageContent,
+            preview: temporaryPreview.preview,
+            modelLabel: temporaryPreview.modelLabel,
+            sourceMessageContent: temporaryPreview.sourceMessageContent,
           },
         ]
       : [];
-    void createCard({
+    void createPreview({
+      selectedText: keyword.text,
+      sourceMessageId: `message-preview-${preview.preview_id}`,
+      sourceMessageContent,
+      parentPreviewId: preview.preview_id,
+      parentCardId: preview.preview_id.replace(/^preview-/, 'card-'),
+      keywordContext: keyword.text,
+      relation: 'deepen',
+      sourceSessionId: temporaryPreview?.sourceSessionId ?? activeSession.id,
+      temporaryAncestors: ancestors,
+    });
+  }
+
+  function handleCardKeyword(card: KnowledgeCard, keyword: InlineKeywordItem) {
+    const sourceMessageContent = knowledgeCardContent(card);
+    void createPreview({
       selectedText: keyword.text,
       sourceMessageId: `message-card-seed-${card.card_id}`,
       sourceMessageContent,
       parentCardId: card.card_id,
       keywordContext: keyword.text,
       relation: 'deepen',
-      persist: false,
-      sourceSessionId: isCurrentTemporary
-        ? temporaryCard.sourceSessionId
-        : activeSession.id,
-      temporaryAncestors: ancestors,
+      sourceSessionId: activeSession.id,
+      temporaryAncestors: [],
     });
   }
 
@@ -478,7 +542,7 @@ export function AICompanionScreen() {
   }
 
   function openBranchChain(
-    entries: TemporaryCardEntry[],
+    entries: PersistedCardEntry[],
     sourceSessionId: string,
   ) {
     const nextSessions = [...sessions];
@@ -501,30 +565,11 @@ export function AICompanionScreen() {
 
     setSessions(nextSessions);
     setActiveSessionId(targetSession.id);
-    setTemporaryCard(null);
+    setTemporaryPreview(null);
     setActiveCardId(null);
   }
 
   function extendCard(card: KnowledgeCard) {
-    if (temporaryCard?.card.card_id === card.card_id) {
-      const chain = [
-        ...temporaryCard.ancestors,
-        {
-          card,
-          modelLabel: temporaryCard.modelLabel,
-          sourceMessageContent: temporaryCard.sourceMessageContent,
-        },
-      ];
-      for (const entry of chain) {
-        persistCard(entry.card, { sourceMessageContent: entry.sourceMessageContent });
-      }
-      setCardModels((current) => Object.fromEntries([
-        ...Object.entries(current),
-        ...chain.map((entry) => [entry.card.card_id, entry.modelLabel]),
-      ]));
-      openBranchChain(chain, temporaryCard.sourceSessionId);
-      return;
-    }
     openBranchChain(
       [{
         card,
@@ -535,28 +580,37 @@ export function AICompanionScreen() {
     );
   }
 
-  function stashCard(cardId: string) {
-    if (temporaryCard?.card.card_id === cardId) {
-      const chain = [
-        ...temporaryCard.ancestors,
-        {
-          card: temporaryCard.card,
-          modelLabel: temporaryCard.modelLabel,
-          sourceMessageContent: temporaryCard.sourceMessageContent,
-        },
-      ];
-      for (const entry of chain) {
-        persistCard(entry.card, { sourceMessageContent: entry.sourceMessageContent });
-      }
-      persistStashedCard(cardId);
-      setCardModels((current) => Object.fromEntries([
-        ...Object.entries(current),
-        ...chain.map((entry) => [entry.card.card_id, entry.modelLabel]),
-      ]));
-      setTemporaryCard(null);
-      setActiveCardId(null);
-      return;
+  function promotePreviewChain(): PersistedCardEntry[] {
+    if (!temporaryPreview) return [];
+    const previews = [
+      ...temporaryPreview.ancestors,
+      {
+        preview: temporaryPreview.preview,
+        modelLabel: temporaryPreview.modelLabel,
+        sourceMessageContent: temporaryPreview.sourceMessageContent,
+      },
+    ];
+    return previews.map((entry) => ({
+      card: knowledgeArtifactToCard(promoteExplanationPreview(entry.preview)),
+      modelLabel: entry.modelLabel,
+      sourceMessageContent: entry.sourceMessageContent,
+    }));
+  }
+
+  function extendPreview(preview: ExplanationPreview) {
+    if (temporaryPreview?.preview.preview_id !== preview.preview_id) return;
+    const chain = promotePreviewChain();
+    for (const entry of chain) {
+      persistCard(entry.card, { sourceMessageContent: entry.sourceMessageContent });
     }
+    setCardModels((current) => Object.fromEntries([
+      ...Object.entries(current),
+      ...chain.map((entry) => [entry.card.card_id, entry.modelLabel]),
+    ]));
+    openBranchChain(chain, temporaryPreview.sourceSessionId);
+  }
+
+  function stashCard(cardId: string) {
     persistStashedCard(cardId);
     setExpandedCardIds((current) => {
       const next = new Set(current);
@@ -564,6 +618,23 @@ export function AICompanionScreen() {
       return next;
     });
     setActiveCardId((current) => (current === cardId ? null : current));
+  }
+
+  function stashPreview(previewId: string) {
+    if (temporaryPreview?.preview.preview_id !== previewId) return;
+    const chain = promotePreviewChain();
+    for (const entry of chain) {
+      persistCard(entry.card, { sourceMessageContent: entry.sourceMessageContent });
+    }
+    const currentCardId = previewId.replace(/^preview-/, 'card-');
+    persistStashedCard(currentCardId);
+    setCardModels((current) => Object.fromEntries([
+      ...Object.entries(current),
+      ...chain.map((entry) => [entry.card.card_id, entry.modelLabel]),
+    ]));
+    setTemporaryPreview(null);
+    setPreviewScale(1);
+    setActiveCardId(null);
   }
 
   function restoreCard(cardId: string) {
@@ -575,16 +646,12 @@ export function AICompanionScreen() {
 
   function presentCard(cardId: string) {
     if (!cards.some((card) => card.card_id === cardId)) return;
-    setTemporaryCard(null);
+    setTemporaryPreview(null);
     restorePersistedCard(cardId);
     setActiveCardId(cardId);
   }
 
   function requestDeleteCard(cardId: string) {
-    if (temporaryCard?.card.card_id === cardId) {
-      setTemporaryCard(null);
-      return;
-    }
     const card = cards.find((item) => item.card_id === cardId);
     if (!card) return;
     Alert.alert(
@@ -614,9 +681,45 @@ export function AICompanionScreen() {
     );
   }
 
+  function discardPreview(previewId: string) {
+    if (temporaryPreview?.preview.preview_id !== previewId) return;
+    setTemporaryPreview(null);
+    setPreviewScale(1);
+  }
+
   function returnToParentConversation() {
     if (!activeSession.parentConversationId || isChatGenerating) return;
     setActiveSessionId(activeSession.parentConversationId);
+  }
+
+  function beginBackgroundTouch(event: GestureResponderEvent) {
+    backgroundTouchRef.current = {
+      x: event.nativeEvent.pageX,
+      y: event.nativeEvent.pageY,
+      moved: false,
+    };
+  }
+
+  function trackBackgroundTouch(event: GestureResponderEvent) {
+    const touch = backgroundTouchRef.current;
+    const distance = Math.hypot(
+      event.nativeEvent.pageX - touch.x,
+      event.nativeEvent.pageY - touch.y,
+    );
+    if (distance > 8) touch.moved = true;
+  }
+
+  function finishBackgroundTouch() {
+    const shouldAutoStash = (
+      temporaryPreview
+      && previewScale <= 0.85
+      && !previewTouchStartedOnCardRef.current
+      && !backgroundTouchRef.current.moved
+    );
+    previewTouchStartedOnCardRef.current = false;
+    if (shouldAutoStash) {
+      requestAnimationFrame(() => stashPreview(temporaryPreview.preview.preview_id));
+    }
   }
 
   return (
@@ -667,7 +770,11 @@ export function AICompanionScreen() {
           <Text style={styles.cardCount}>{cards.length} 卡</Text>
         </View>
 
-        <View style={styles.body}>
+        <View
+          style={styles.body}
+          onTouchStart={beginBackgroundTouch}
+          onTouchMove={trackBackgroundTouch}
+          onTouchEnd={finishBackgroundTouch}>
           <FlatList
             ref={listRef}
             data={messages}
@@ -787,25 +894,20 @@ export function AICompanionScreen() {
               <View style={styles.cardLoading}>
                 <View style={styles.cardLoadingDot} />
                 <View style={styles.cardLoadingBody}>
-                  <Text style={styles.cardLoadingTitle}>正在提炼知识卡片</Text>
-                  <Text style={styles.cardLoadingText}>Flash 模型正在整理核心结论</Text>
+                  <Text style={styles.cardLoadingTitle}>正在生成即时解释</Text>
+                  <Text style={styles.cardLoadingText}>Flash 模型正在快速解释当前知识点</Text>
                 </View>
               </View>
             </View>
           )}
-          {activeCard && (
+          {persistedActiveCard && (
             <CompactKnowledgeCard
-              key={activeCard.card_id}
-              card={activeCard}
-              modelLabel={
-                temporaryCard?.card.card_id === activeCard.card_id
-                  ? temporaryCard.modelLabel
-                  : cardModels[activeCard.card_id]
-              }
-              node={getCardNode(activeCard.card_id)}
+              key={persistedActiveCard.card_id}
+              card={persistedActiveCard}
+              modelLabel={cardModels[persistedActiveCard.card_id]}
+              node={getCardNode(persistedActiveCard.card_id)}
               expandedCardIds={expandedCardIds}
               onClose={() => {
-                setTemporaryCard(null);
                 setActiveCardId(null);
               }}
               onToggleExpand={toggleCardExpanded}
@@ -813,7 +915,22 @@ export function AICompanionScreen() {
               onKeywordPress={handleCardKeyword}
               onStash={stashCard}
               onRequestDelete={requestDeleteCard}
-              temporary={temporaryCard?.card.card_id === activeCard.card_id}
+            />
+          )}
+          {temporaryPreview && (
+            <ExplanationPreviewCard
+              key={temporaryPreview.preview.preview_id}
+              preview={temporaryPreview.preview}
+              modelLabel={temporaryPreview.modelLabel}
+              onClose={() => discardPreview(temporaryPreview.preview.preview_id)}
+              onExtend={extendPreview}
+              onStash={stashPreview}
+              onRequestDelete={discardPreview}
+              onKeywordPress={handlePreviewKeyword}
+              onScaleChange={setPreviewScale}
+              onCardTouchStart={() => {
+                previewTouchStartedOnCardRef.current = true;
+              }}
             />
           )}
         </View>

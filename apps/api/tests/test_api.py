@@ -102,6 +102,32 @@ async def test_structured_study_chat_and_knowledge_card() -> None:
 
 
 @pytest.mark.asyncio
+async def test_explanation_preview_is_lightweight_and_preserves_relation() -> None:
+    async with api_client() as client:
+        response = await client.post(
+            "/api/v1/ai/explanation-preview",
+            json={
+                "selected_text": "训练数据",
+                "source_message_id": "message-source-1",
+                "source_message_content": "训练数据会影响模型识别新样本的表现。",
+                "parent_preview_id": None,
+                "parent_card_id": None,
+                "keyword_context": "训练数据",
+                "relation": "deepen",
+            },
+        )
+    assert response.status_code == 200
+    payload = response.json()
+    preview = payload["preview"]
+    assert preview["preview_id"].startswith("preview-")
+    assert preview["relation"] == "deepen"
+    assert preview["explanation"]
+    assert "reasoning_steps" not in preview
+    assert "key_points" not in preview
+    assert "evidence_refs" in preview
+
+
+@pytest.mark.asyncio
 async def test_streaming_study_chat_emits_reasoning_then_answer() -> None:
     async with api_client() as client:
         response = await client.post(

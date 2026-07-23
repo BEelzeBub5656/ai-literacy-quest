@@ -9,7 +9,7 @@ import {
   type KnowledgeEdge,
   type KnowledgeNode,
 } from './contracts';
-import { forceLayout, layeredLayout, type Positions } from './layouts';
+import { forceLayout, layeredLayout, type ForceParams, type Positions } from './layouts';
 
 export type UseGraphState = {
   mode: GraphMode;
@@ -50,6 +50,7 @@ export function useGraphState(
   layoutsByMode: Partial<Record<GraphMode, Positions>> = {},
   saveNodePosition?: (mode: GraphMode, nodeId: string, x: number, y: number) => void,
   clearModeLayout?: (mode: GraphMode) => void,
+  forceParams?: ForceParams,
 ): UseGraphState {
   const [mode, setMode] = useState<GraphMode>('network');
   const [filter, setFilter] = useState<GraphFilter>(EMPTY_FILTER);
@@ -70,8 +71,8 @@ export function useGraphState(
   const basePositions = useMemo(() => {
     const ids = allNodes.map((node) => node.id);
     if (mode === 'path') return layeredLayout(ids, allEdges, HIERARCHY_RELATIONS);
-    return forceLayout(ids, allEdges);
-  }, [allNodes, allEdges, mode]);
+    return forceLayout(ids, allEdges, { force: forceParams });
+  }, [allNodes, allEdges, mode, forceParams]);
 
   const positions = useMemo(() => {
     const overrides = layoutsByMode[mode] ?? {};

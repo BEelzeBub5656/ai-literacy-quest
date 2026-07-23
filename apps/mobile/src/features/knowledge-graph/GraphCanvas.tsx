@@ -69,7 +69,7 @@ const EDGE_COLOR="${EDGE_COLOR}";
 const EDGE_HL="${EDGE_HIGHLIGHT}";
 const INK="#182033",MUTED="#6D758A",FOCUS="#4E57C8",REVIEW="#D84C62",BG="#F5F6FB";
 
-function nodeRadius(imp){return 18+Math.max(1,Math.min(3,imp))*6}
+function nodeRadius(imp){return 10+Math.max(1,Math.min(3,imp))*4}
 
 const canvas=document.getElementById('c');
 const ctx=canvas.getContext('2d');
@@ -128,7 +128,7 @@ function draw(){
     if(!a||!b)continue;
     const src=G.nodes.find(n=>n.id===e.source),tgt=G.nodes.find(n=>n.id===e.target);
     if(!src||!tgt)continue;
-    const dx=b.x-a.x,dy=b.y-a.y,len=Math.hypot(dx,dy)||1,ux=dx/len,uy=dy/len,gap=4;
+    const dx=b.x-a.x,dy=b.y-a.y,len=Math.hypot(dx,dy)||1,ux=dx/len,uy=dy/len,gap=3;
     const r1=nodeRadius(src.importance),r2=nodeRadius(tgt.importance);
     const x1=a.x+ux*(r1+gap),y1=a.y+uy*(r1+gap),x2=b.x-ux*(r2+gap),y2=b.y-uy*(r2+gap);
     const connected=fid!==null&&(e.source===fid||e.target===fid);
@@ -145,14 +145,14 @@ function draw(){
       ctx.fillStyle=color;
       ctx.beginPath();
       ctx.moveTo(x2,y2);
-      ctx.lineTo(x2-9*Math.cos(a1)-6*Math.cos(a1+Math.PI/2),y2-9*Math.sin(a1)-6*Math.sin(a1+Math.PI/2));
-      ctx.lineTo(x2-9*Math.cos(a1)+6*Math.cos(a1+Math.PI/2),y2-9*Math.sin(a1)+6*Math.sin(a1+Math.PI/2));
+      ctx.lineTo(x2-7*Math.cos(a1)-5*Math.cos(a1+Math.PI/2),y2-7*Math.sin(a1)-5*Math.sin(a1+Math.PI/2));
+      ctx.lineTo(x2-7*Math.cos(a1)+5*Math.cos(a1+Math.PI/2),y2-7*Math.sin(a1)+5*Math.sin(a1+Math.PI/2));
       ctx.closePath();ctx.fill();
     }
     if(showLabel(e)){
       const mx=(a.x+b.x)/2,my=(a.y+b.y)/2;
       ctx.fillStyle=connected?FOCUS:MUTED;
-      ctx.font='700 12px sans-serif';
+      ctx.font='700 10px sans-serif';
       ctx.textAlign='center';
       ctx.fillText(REL[e.relation]||'',mx,my-6);
     }
@@ -172,13 +172,13 @@ function draw(){
     const isDragging=drag.id===n.id;
     ctx.globalAlpha=dim?0.25:1;
 
-    if(isSelected){ctx.strokeStyle=FOCUS;ctx.lineWidth=2;ctx.beginPath();ctx.arc(p.x,p.y,r+8,0,Math.PI*2);ctx.stroke()}
-    if(isDragging){ctx.strokeStyle=FOCUS;ctx.lineWidth=2.5;ctx.setLineDash([4,3]);ctx.beginPath();ctx.arc(p.x,p.y,r+6,0,Math.PI*2);ctx.stroke();ctx.setLineDash([])}
+    if(isSelected){ctx.strokeStyle=FOCUS;ctx.lineWidth=2;ctx.beginPath();ctx.arc(p.x,p.y,r+6,0,Math.PI*2);ctx.stroke()}
+    if(isDragging){ctx.strokeStyle=FOCUS;ctx.lineWidth=2.5;ctx.setLineDash([4,3]);ctx.beginPath();ctx.arc(p.x,p.y,r+5,0,Math.PI*2);ctx.stroke();ctx.setLineDash([])}
 
     // 掌握度外圈
     ctx.strokeStyle=mas.ring;ctx.lineWidth=3;
     if(mas.dashed){ctx.setLineDash([5,4])}else{ctx.setLineDash([])}
-    ctx.beginPath();ctx.arc(p.x,p.y,r+4,0,Math.PI*2);ctx.stroke();
+    ctx.beginPath();ctx.arc(p.x,p.y,r+3,0,Math.PI*2);ctx.stroke();
     ctx.setLineDash([]);
 
     // 分类填充
@@ -189,13 +189,13 @@ function draw(){
     // 复习标记
     if(n.review||n.mastery==='review'){
       const bx=p.x+r*0.72,by=p.y-r*0.72;
-      ctx.fillStyle=REVIEW;ctx.beginPath();ctx.arc(bx,by,8,0,Math.PI*2);ctx.fill();
-      ctx.fillStyle='#FFF';ctx.font='800 11px sans-serif';ctx.textAlign='center';ctx.fillText('!',bx,by+4);
+      ctx.fillStyle=REVIEW;ctx.beginPath();ctx.arc(bx,by,6,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle='#FFF';ctx.font='800 9px sans-serif';ctx.textAlign='center';ctx.fillText('!',bx,by+3);
     }
 
     // 标题
-    ctx.fillStyle=INK;ctx.font='700 12.5px sans-serif';ctx.textAlign='center';
-    ctx.fillText(n.title,p.x,p.y+r+15);
+    ctx.fillStyle=INK;ctx.font='700 10px sans-serif';ctx.textAlign='center';
+    ctx.fillText(n.title,p.x,p.y+r+11);
   }
   ctx.globalAlpha=1;
   ctx.restore();

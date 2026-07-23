@@ -13,15 +13,35 @@ const DEFAULT_SIZE = 1000;
  * 节点间斥力 + 边弹簧引力 + 向心力，迭代收敛后停止。
  * 初始位置用确定性环形分布，保证每次打开布局稳定、不抖动。
  */
+export type ForceParams = {
+  /** 节点间排斥力强度（越大节点越分散）。 */
+  repulse: number;
+  /** 相连节点间弹簧吸引力（越大连线越短）。 */
+  spring: number;
+  /** 向心力（越大整体越紧凑居中）。 */
+  gravity: number;
+  /** 理想连线长度倍率（越大节点间距越大）。 */
+  linkDistance: number;
+};
+
+export const DEFAULT_FORCE_PARAMS: ForceParams = {
+  repulse: 7200,
+  spring: 0.045,
+  gravity: 0.02,
+  linkDistance: 1,
+};
+
 export function forceLayout(
   nodeIds: string[],
   edges: { source: string; target: string }[],
-  options?: { size?: number; iterations?: number },
+  options?: { size?: number; iterations?: number; force?: Partial<ForceParams> },
 ): Positions {
   const n = nodeIds.length;
   const size = options?.size ?? DEFAULT_SIZE;
   const iterations = options?.iterations ?? 120;
   if (n === 0) return {};
+
+  const fp = { ...DEFAULT_FORCE_PARAMS, ...options?.force };
 
   const pos: Positions = {};
   const vel: Positions = {};
@@ -32,10 +52,10 @@ export function forceLayout(
     vel[id] = { x: 0, y: 0 };
   });
 
-  const k = size / Math.sqrt(Math.max(n, 1));
-  const repulse = 7200;
-  const spring = 0.045;
-  const gravity = 0.02;
+  const k = (size / Math.sqrt(Math.max(n, 1))) * fp.linkDistance;
+  const repulse = fp.repulse;
+  const spring = fp.spring;
+  const gravity = fp.gravity;
   const damping = 0.86;
 
   for (let it = 0; it < iterations; it++) {
