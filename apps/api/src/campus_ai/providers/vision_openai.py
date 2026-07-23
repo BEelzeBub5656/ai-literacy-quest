@@ -63,7 +63,7 @@ class OpenAIVisionProvider(VisionProvider):
             "temperature": 0.2,
         }
         headers = {
-            "Authorization": f"Bearer {self._settings.vision_openai_api_key}",
+            "Authorization": f"Bearer {self._settings.resolved_vision_api_key}",
             "Content-Type": "application/json",
         }
         url = (

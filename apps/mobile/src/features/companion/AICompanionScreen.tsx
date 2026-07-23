@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   Alert,
   FlatList,
@@ -21,6 +22,7 @@ import { CompactKnowledgeCard } from './CompactKnowledgeCard';
 import {
   createDetailBranch,
   createInitialSession,
+  knowledgeCardContent,
   requestMessagesFor,
 } from './conversation';
 import type {
@@ -34,7 +36,6 @@ import type {
   KnowledgeCard,
 } from './contracts';
 import { cardTreeFromList } from './contracts';
-import { DirectionPicker } from './DirectionPicker';
 import { SessionSwitcherModal } from './SessionSwitcherModal';
 import { StashedCardRail } from './StashedCardRail';
 import { TextSelectionModal } from './TextSelectionModal';
@@ -46,6 +47,58 @@ const welcomeMessage: CompanionMessage = {
   role: 'assistant',
   content: '你好，我是你的 AI 通识伴学伙伴。可以陪你理解课程、分析实验结果，也可以围绕回答中的重点继续探索。',
 };
+
+type TemporaryCardEntry = {
+  card: KnowledgeCard;
+  modelLabel: string;
+  sourceMessageContent: string;
+};
+
+type TemporaryKnowledgeCard = TemporaryCardEntry & {
+  sourceSessionId: string;
+  ancestors: TemporaryCardEntry[];
+};
+
+const SESSION_STORAGE_KEY = '@campus-ai:companion-sessions:v1';
+
+type StoredConversationWorkspace = {
+  schemaVersion: 1;
+  sessions: ConversationSession[];
+  activeSessionId: string;
+};
+
+function isCompanionMessage(value: unknown): value is CompanionMessage {
+  if (!value || typeof value !== 'object') return false;
+  const message = value as Partial<CompanionMessage>;
+  return (
+    typeof message.id === 'string'
+    && (message.role === 'user' || message.role === 'assistant')
+    && typeof message.content === 'string'
+  );
+}
+
+function restoreConversationWorkspace(raw: string): StoredConversationWorkspace | null {
+  try {
+    const value = JSON.parse(raw) as Partial<StoredConversationWorkspace>;
+    if (value.schemaVersion !== 1 || !Array.isArray(value.sessions)) return null;
+    const sessions = value.sessions.filter((session): session is ConversationSession => (
+      Boolean(session)
+      && typeof session.id === 'string'
+      && typeof session.title === 'string'
+      && Array.isArray(session.messages)
+      && session.messages.every(isCompanionMessage)
+      && Array.isArray(session.contextMessages)
+      && session.contextMessages.every(isCompanionMessage)
+    ));
+    if (sessions.length === 0) return null;
+    const activeSessionId = sessions.some((session) => session.id === value.activeSessionId)
+      ? value.activeSessionId!
+      : sessions[0].id;
+    return { schemaVersion: 1, sessions, activeSessionId };
+  } catch {
+    return null;
+  }
+}
 
 function errorMessage(error: unknown): string {
   if (error instanceof ZodError) return '服务返回内容没有通过结构校验，请重新生成。';
@@ -79,21 +132,20 @@ export function AICompanionScreen() {
   const initialSession = useMemo(() => createInitialSession(welcomeMessage), []);
   const [sessions, setSessions] = useState<ConversationSession[]>([initialSession]);
   const [activeSessionId, setActiveSessionId] = useState(initialSession.id);
+  const [sessionsHydrated, setSessionsHydrated] = useState(false);
   const [input, setInput] = useState('');
   const [isChatGenerating, setIsChatGenerating] = useState(false);
   const [isCardGenerating, setIsCardGenerating] = useState(false);
   const [runtimeStatus, setRuntimeStatus] = useState<AgentRuntimeStatus>({ phase: 'checking' });
   const [selectionMessage, setSelectionMessage] = useState<CompanionMessage | null>(null);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
+  const [temporaryCard, setTemporaryCard] = useState<TemporaryKnowledgeCard | null>(null);
   const [cardModels, setCardModels] = useState<Record<string, string>>({});
   const [expandedCardIds, setExpandedCardIds] = useState<Set<string>>(new Set());
   const [sessionPickerVisible, setSessionPickerVisible] = useState(false);
   const listRef = useRef<FlatList<any>>(null);
   const abortRef = useRef<AbortController | null>(null);
   const cardGenerationRef = useRef(false);
-  const [directionKeyword, setDirectionKeyword] = useState<string>('');
-  const [directionMessage, setDirectionMessage] = useState<CompanionMessage | null>(null);
-  const [directionPickerVisible, setDirectionPickerVisible] = useState(false);
 
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeSessionId) ?? sessions[0],
@@ -101,7 +153,8 @@ export function AICompanionScreen() {
   );
   const messages = activeSession.messages;
   const statusLabel = agentStatusLabel(runtimeStatus);
-  const activeCard = cards.find((card) => card.card_id === activeCardId) ?? null;
+  const persistedActiveCard = cards.find((card) => card.card_id === activeCardId) ?? null;
+  const activeCard = temporaryCard?.card ?? persistedActiveCard;
 
   const cardTree = useMemo(() => cardTreeFromList(cards), [cards]);
 
@@ -171,6 +224,37 @@ export function AICompanionScreen() {
       abortRef.current?.abort();
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    AsyncStorage.getItem(SESSION_STORAGE_KEY)
+      .then((raw) => {
+        if (cancelled || !raw) return;
+        const restored = restoreConversationWorkspace(raw);
+        if (!restored) return;
+        setSessions(restored.sessions);
+        setActiveSessionId(restored.activeSessionId);
+      })
+      .finally(() => {
+        if (!cancelled) setSessionsHydrated(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!sessionsHydrated) return;
+    const timeout = setTimeout(() => {
+      const snapshot: StoredConversationWorkspace = {
+        schemaVersion: 1,
+        sessions,
+        activeSessionId,
+      };
+      AsyncStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(snapshot)).catch(() => undefined);
+    }, 250);
+    return () => clearTimeout(timeout);
+  }, [activeSessionId, sessions, sessionsHydrated]);
 
   function setSessionMessages(
     sessionId: string,
@@ -300,6 +384,9 @@ export function AICompanionScreen() {
     keywordContext?: string;
     relation?: CardRelationType;
     sourceType?: CardSourceType;
+    persist?: boolean;
+    sourceSessionId?: string;
+    temporaryAncestors?: TemporaryCardEntry[];
   }): Promise<KnowledgeCard | null> {
     if (cardGenerationRef.current) return null;
     cardGenerationRef.current = true;
@@ -314,8 +401,20 @@ export function AICompanionScreen() {
         relation: cardInput.relation,
         sourceType: cardInput.sourceType,
       });
-      persistCard(result.card, { sourceMessageContent: cardInput.sourceMessageContent });
-      setActiveCardId(result.card.card_id);
+      if (cardInput.persist === false) {
+        setTemporaryCard({
+          card: result.card,
+          modelLabel: result.model,
+          sourceMessageContent: cardInput.sourceMessageContent,
+          sourceSessionId: cardInput.sourceSessionId ?? activeSession.id,
+          ancestors: cardInput.temporaryAncestors ?? [],
+        });
+        setActiveCardId(null);
+      } else {
+        persistCard(result.card, { sourceMessageContent: cardInput.sourceMessageContent });
+        setTemporaryCard(null);
+        setActiveCardId(result.card.card_id);
+      }
       setCardModels((current) => ({ ...current, [result.card.card_id]: result.model }));
       return result.card;
     } catch (error) {
@@ -328,22 +427,44 @@ export function AICompanionScreen() {
   }
 
   function handleMessageKeyword(message: CompanionMessage, keyword: InlineKeywordItem) {
-    setDirectionKeyword(keyword.text);
-    setDirectionMessage(message);
-    setDirectionPickerVisible(true);
-  }
-
-  function handleDirectionSelect(relation: CardRelationType) {
-    const message = directionMessage;
-    const keyword = directionKeyword;
-    setDirectionPickerVisible(false);
-    if (!message || !keyword) return;
     void createCard({
-      selectedText: keyword,
+      selectedText: keyword.text,
       sourceMessageId: message.serverId ?? message.id,
       sourceMessageContent: message.content,
-      keywordContext: keyword,
-      relation,
+      parentCardId: activeSession.sourceCardId ?? null,
+      keywordContext: keyword.text,
+      relation: 'deepen',
+      persist: false,
+      sourceSessionId: activeSession.id,
+      temporaryAncestors: [],
+    });
+  }
+
+  function handleCardKeyword(card: KnowledgeCard, keyword: InlineKeywordItem) {
+    const sourceMessageContent = knowledgeCardContent(card);
+    const isCurrentTemporary = temporaryCard?.card.card_id === card.card_id;
+    const ancestors = isCurrentTemporary
+      ? [
+          ...temporaryCard.ancestors,
+          {
+            card: temporaryCard.card,
+            modelLabel: temporaryCard.modelLabel,
+            sourceMessageContent: temporaryCard.sourceMessageContent,
+          },
+        ]
+      : [];
+    void createCard({
+      selectedText: keyword.text,
+      sourceMessageId: `message-card-seed-${card.card_id}`,
+      sourceMessageContent,
+      parentCardId: card.card_id,
+      keywordContext: keyword.text,
+      relation: 'deepen',
+      persist: false,
+      sourceSessionId: isCurrentTemporary
+        ? temporaryCard.sourceSessionId
+        : activeSession.id,
+      temporaryAncestors: ancestors,
     });
   }
 
@@ -356,30 +477,86 @@ export function AICompanionScreen() {
     });
   }
 
-  function startDetailConversation(card: KnowledgeCard) {
-    const launch = createDetailBranch(activeSession, card);
-    stashCard(card.card_id);
-    setSessions((current) => [...current, launch.session]);
-    setActiveSessionId(launch.session.id);
-    void runStream(
-      launch.session.id,
-      launch.requestMessages,
-      launch.assistantMessageId,
-    );
+  function openBranchChain(
+    entries: TemporaryCardEntry[],
+    sourceSessionId: string,
+  ) {
+    const nextSessions = [...sessions];
+    let sourceSession = nextSessions.find((session) => session.id === sourceSessionId)
+      ?? activeSession;
+    let targetSession = sourceSession;
+
+    for (const entry of entries) {
+      const existing = nextSessions.find((session) => session.sourceCardId === entry.card.card_id);
+      if (existing) {
+        targetSession = existing;
+        sourceSession = existing;
+        continue;
+      }
+      const launch = createDetailBranch(sourceSession, entry.card);
+      nextSessions.push(launch.session);
+      targetSession = launch.session;
+      sourceSession = launch.session;
+    }
+
+    setSessions(nextSessions);
+    setActiveSessionId(targetSession.id);
+    setTemporaryCard(null);
+    setActiveCardId(null);
   }
 
-  function requestLearnMore(card: KnowledgeCard) {
-    Alert.alert(
-      '新开一个深入会话？',
-      `将围绕"${card.title}"创建新会话，并继承当前会话中与这张卡片相关的上下文。当前会话会原样保留。`,
-      [
-        { text: '取消', style: 'cancel' },
-        { text: '新建会话', onPress: () => startDetailConversation(card) },
-      ],
+  function extendCard(card: KnowledgeCard) {
+    if (temporaryCard?.card.card_id === card.card_id) {
+      const chain = [
+        ...temporaryCard.ancestors,
+        {
+          card,
+          modelLabel: temporaryCard.modelLabel,
+          sourceMessageContent: temporaryCard.sourceMessageContent,
+        },
+      ];
+      for (const entry of chain) {
+        persistCard(entry.card, { sourceMessageContent: entry.sourceMessageContent });
+      }
+      setCardModels((current) => Object.fromEntries([
+        ...Object.entries(current),
+        ...chain.map((entry) => [entry.card.card_id, entry.modelLabel]),
+      ]));
+      openBranchChain(chain, temporaryCard.sourceSessionId);
+      return;
+    }
+    openBranchChain(
+      [{
+        card,
+        modelLabel: cardModels[card.card_id] ?? '',
+        sourceMessageContent: knowledgeCardContent(card),
+      }],
+      activeSession.id,
     );
   }
 
   function stashCard(cardId: string) {
+    if (temporaryCard?.card.card_id === cardId) {
+      const chain = [
+        ...temporaryCard.ancestors,
+        {
+          card: temporaryCard.card,
+          modelLabel: temporaryCard.modelLabel,
+          sourceMessageContent: temporaryCard.sourceMessageContent,
+        },
+      ];
+      for (const entry of chain) {
+        persistCard(entry.card, { sourceMessageContent: entry.sourceMessageContent });
+      }
+      persistStashedCard(cardId);
+      setCardModels((current) => Object.fromEntries([
+        ...Object.entries(current),
+        ...chain.map((entry) => [entry.card.card_id, entry.modelLabel]),
+      ]));
+      setTemporaryCard(null);
+      setActiveCardId(null);
+      return;
+    }
     persistStashedCard(cardId);
     setExpandedCardIds((current) => {
       const next = new Set(current);
@@ -398,11 +575,16 @@ export function AICompanionScreen() {
 
   function presentCard(cardId: string) {
     if (!cards.some((card) => card.card_id === cardId)) return;
+    setTemporaryCard(null);
     restorePersistedCard(cardId);
     setActiveCardId(cardId);
   }
 
   function requestDeleteCard(cardId: string) {
+    if (temporaryCard?.card.card_id === cardId) {
+      setTemporaryCard(null);
+      return;
+    }
     const card = cards.find((item) => item.card_id === cardId);
     if (!card) return;
     Alert.alert(
@@ -539,7 +721,8 @@ export function AICompanionScreen() {
                               node={node}
                               expandedCardIds={expandedCardIds}
                               onToggleExpand={toggleCardExpanded}
-                              onLearnMore={requestLearnMore}
+                              onExtend={extendCard}
+                              onKeywordPress={handleCardKeyword}
                               onStash={stashCard}
                               onRequestDelete={requestDeleteCard}
                               onCreateChildCard={async (parentCard, text) => {
@@ -614,14 +797,23 @@ export function AICompanionScreen() {
             <CompactKnowledgeCard
               key={activeCard.card_id}
               card={activeCard}
-              modelLabel={cardModels[activeCard.card_id]}
+              modelLabel={
+                temporaryCard?.card.card_id === activeCard.card_id
+                  ? temporaryCard.modelLabel
+                  : cardModels[activeCard.card_id]
+              }
               node={getCardNode(activeCard.card_id)}
               expandedCardIds={expandedCardIds}
-              onClose={() => setActiveCardId(null)}
+              onClose={() => {
+                setTemporaryCard(null);
+                setActiveCardId(null);
+              }}
               onToggleExpand={toggleCardExpanded}
-              onLearnMore={requestLearnMore}
+              onExtend={extendCard}
+              onKeywordPress={handleCardKeyword}
               onStash={stashCard}
               onRequestDelete={requestDeleteCard}
+              temporary={temporaryCard?.card.card_id === activeCard.card_id}
             />
           )}
         </View>
@@ -680,12 +872,6 @@ export function AICompanionScreen() {
           if (!isChatGenerating) setActiveSessionId(sessionId);
           setSessionPickerVisible(false);
         }}
-      />
-      <DirectionPicker
-        visible={directionPickerVisible}
-        keyword={directionKeyword}
-        onClose={() => setDirectionPickerVisible(false)}
-        onSelect={handleDirectionSelect}
       />
     </SafeAreaView>
   );

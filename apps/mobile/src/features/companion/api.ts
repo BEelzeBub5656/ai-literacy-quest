@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 import { z } from 'zod';
 
 import {
+  annotateTextResponseSchema,
   generateKnowledgeCardResponseSchema,
   inlineKeywordDraftSchema,
   type CardRelationType,
@@ -143,6 +144,24 @@ export async function streamStudyChat(
 export async function getAIServiceStatus(): Promise<AIServiceStatus> {
   const payload = await requestJson('/ai/status', { method: 'GET' });
   return aiStatusSchema.parse(payload);
+}
+
+type AnnotateTextInput = {
+  text: string;
+  sourceContext?: string | null;
+  learnerContext?: string | null;
+};
+
+export async function annotateText(input: AnnotateTextInput) {
+  const payload = await requestJson('/ai/annotate-text', {
+    method: 'POST',
+    body: JSON.stringify({
+      text: input.text,
+      source_context: input.sourceContext ?? null,
+      learner_context: input.learnerContext ?? null,
+    }),
+  });
+  return annotateTextResponseSchema.parse(payload);
 }
 
 type GenerateCardInput = {

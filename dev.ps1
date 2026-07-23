@@ -3,8 +3,7 @@ param(
     [int]$ApiPort = 8010,
     [int]$MetroPort = 8081,
     [string]$ClientApiHost = '',
-    [switch]$ClearCache,
-    [switch]$Restart
+    [switch]$ClearCache
 )
 
 $ErrorActionPreference = 'Stop'
@@ -22,53 +21,52 @@ function Write-Step {
     Write-Host "`n==> $Message" -ForegroundColor Cyan
 }
 
+function Stop-ProcessTree {
+    param([int]$TargetProcessId)
+    $children = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.ParentProcessId -eq $TargetProcessId }
+    foreach ($child in $children) {
+        Stop-ProcessTree -TargetProcessId $child.ProcessId
+    }
+    Stop-Process -Id $TargetProcessId -Force -ErrorAction SilentlyContinue
+}
+
+# 清理占用指定监听端口的进程（无条件执行）
+function Clear-Port {
+    param(
+        [int]$Port,
+        [string]$ServiceName
+    )
+    $owners = Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue |
+        Select-Object -ExpandProperty OwningProcess -Unique
+    foreach ($pidVal in $owners) {
+        if (-not $pidVal) { continue }
+        Write-Host "  释放被占用的 $ServiceName 端口 $Port（进程 $pidVal）..." -ForegroundColor Yellow
+        Stop-ProcessTree -TargetProcessId $pidVal
+    }
+}
+
+# 按命令行特征清理残留进程（用于端口还没起来但进程已残留的情况）
+function Stop-ByCommandLine {
+    param(
+        [string]$Pattern,
+        [string]$ServiceName
+    )
+    $procs = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -and $_.CommandLine -match $Pattern }
+    foreach ($p in $procs) {
+        Write-Host "  终止残留 $ServiceName 进程 $($p.ProcessId)..." -ForegroundColor Yellow
+        Stop-ProcessTree -TargetProcessId $p.ProcessId
+    }
+}
+
 function Get-RequiredCommand {
     param([string]$Name)
-
     $command = Get-Command $Name -ErrorAction SilentlyContinue
     if (-not $command) {
         throw "缺少命令 '$Name'，请先安装并将其加入 PATH。"
     }
     return $command.Source
-}
-
-function Get-PortOwner {
-    param([int]$Port)
-
-    return Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue |
-        Select-Object -First 1
-}
-
-function Stop-ProcessTree {
-    param([int]$TargetProcessId)
-
-    $children = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-        Where-Object { $_.ParentProcessId -eq $TargetProcessId }
-
-    foreach ($child in $children) {
-        Stop-ProcessTree -TargetProcessId $child.ProcessId
-    }
-
-    Stop-Process -Id $TargetProcessId -Force -ErrorAction SilentlyContinue
-}
-
-function Prepare-Port {
-    param(
-        [int]$Port,
-        [string]$ServiceName
-    )
-
-    $owner = Get-PortOwner -Port $Port
-    if (-not $owner) {
-        return
-    }
-
-    if (-not $Restart) {
-        throw "$ServiceName 端口 $Port 已被进程 $($owner.OwningProcess) 占用。请关闭它，或使用 -Restart 参数。"
-    }
-
-    Write-Host "停止占用端口 $Port 的进程 $($owner.OwningProcess)..." -ForegroundColor Yellow
-    Stop-ProcessTree -TargetProcessId $owner.OwningProcess
 }
 
 function Wait-ForApi {
@@ -77,13 +75,11 @@ function Wait-ForApi {
         [System.Diagnostics.Process]$Process,
         [int]$TimeoutSeconds = 30
     )
-
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     while ((Get-Date) -lt $deadline) {
         if ($Process.HasExited) {
             throw "后端提前退出。请查看 $apiStderrLog"
         }
-
         $webClient = New-Object System.Net.WebClient
         $webClient.Proxy = $null
         try {
@@ -97,7 +93,6 @@ function Wait-ForApi {
             $webClient.Dispose()
         }
     }
-
     throw "后端在 $TimeoutSeconds 秒内未通过健康检查。请查看 $apiStderrLog"
 }
 
@@ -107,7 +102,6 @@ function Get-PrimaryIpv4Address {
             Where-Object { $_.NextHop -ne '0.0.0.0' } |
             Sort-Object RouteMetric, InterfaceMetric |
             Select-Object -First 1
-
         if ($route) {
             $address = Get-NetIPAddress -AddressFamily IPv4 -InterfaceIndex $route.InterfaceIndex -ErrorAction Stop |
                 Where-Object { $_.IPAddress -notlike '169.254.*' } |
@@ -120,23 +114,21 @@ function Get-PrimaryIpv4Address {
     catch {
         # 无可用局域网地址时回退到 localhost。
     }
-
     return 'localhost'
 }
 
 function Get-ConnectedAndroidTarget {
     param([string]$AdbPath)
-
     if (-not $AdbPath) {
         return $null
     }
-
     $lines = & $AdbPath devices -l 2>$null
     return $lines |
         Where-Object { $_ -match '^\S+\s+device\b' } |
         Select-Object -First 1
 }
 
+# ---------- 前置检查 ----------
 if (-not (Test-Path -LiteralPath $apiDirectory -PathType Container)) {
     throw "找不到后端目录：$apiDirectory"
 }
@@ -151,10 +143,23 @@ $adbCommand = Get-Command 'adb.exe' -ErrorAction SilentlyContinue
 $adbPath = if ($adbCommand) { $adbCommand.Source } else { $null }
 $androidTarget = Get-ConnectedAndroidTarget -AdbPath $adbPath
 
-New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
-Prepare-Port -Port $ApiPort -ServiceName 'FastAPI'
-Prepare-Port -Port $MetroPort -ServiceName 'Expo/Metro'
+Write-Host '========================================' -ForegroundColor DarkCyan
+Write-Host '  知芽校园 - 一键开发环境' -ForegroundColor Green
+Write-Host '========================================' -ForegroundColor DarkCyan
 
+# ---------- 1. 先清理残留进程与占用端口 ----------
+Write-Step '清理残留进程与占用端口'
+Clear-Port -Port $ApiPort -ServiceName 'FastAPI'
+Clear-Port -Port $MetroPort -ServiceName 'Expo/Metro'
+Clear-Port -Port 19000 -ServiceName 'Expo'
+Clear-Port -Port 19001 -ServiceName 'Expo'
+Clear-Port -Port 19002 -ServiceName 'Expo'
+Stop-ByCommandLine -Pattern 'campus_ai\.main:app' -ServiceName 'FastAPI'
+Stop-ByCommandLine -Pattern 'apps[\\/]mobile.*expo|expo.*apps[\\/]mobile' -ServiceName 'Expo'
+Start-Sleep -Milliseconds 600
+
+# ---------- 2. 依赖安装（首次） ----------
+New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
 if (-not (Test-Path -LiteralPath (Join-Path $mobileDirectory 'node_modules') -PathType Container)) {
     Write-Step '首次运行，安装移动端依赖'
     Push-Location $mobileDirectory
@@ -169,11 +174,8 @@ if (-not (Test-Path -LiteralPath (Join-Path $mobileDirectory 'node_modules') -Pa
     }
 }
 
-Write-Host '========================================' -ForegroundColor DarkCyan
-Write-Host '  AI Literacy Quest - Development' -ForegroundColor Green
-Write-Host '========================================' -ForegroundColor DarkCyan
-
 try {
+    # ---------- 3. 同步后端虚拟环境 ----------
     Write-Step '同步 FastAPI 虚拟环境'
     Push-Location $apiDirectory
     try {
@@ -186,18 +188,15 @@ try {
         Pop-Location
     }
 
+    # ---------- 4. 启动后端（监听 0.0.0.0，供手机访问） ----------
     Write-Step "启动 FastAPI（端口 $ApiPort）"
     $apiArguments = @(
-        'run',
-        'python',
-        '-m',
-        'uvicorn',
+        'run', 'python', '-m', 'uvicorn',
         'campus_ai.main:app',
         '--host', '0.0.0.0',
         '--port', $ApiPort,
         '--reload'
     )
-
     $apiProcess = Start-Process `
         -FilePath $uvPath `
         -ArgumentList $apiArguments `
@@ -207,11 +206,11 @@ try {
         -RedirectStandardError $apiStderrLog `
         -PassThru
 
-    # 显式使用回环地址并绕过系统代理，避免 localhost 健康检查被代理规则拦截。
     $healthUrl = "http://127.0.0.1:$ApiPort/api/v1/ai/status"
     Wait-ForApi -Url $healthUrl -Process $apiProcess
     Write-Host "后端已就绪：$healthUrl" -ForegroundColor Green
 
+    # ---------- 5. 计算手机可连的后端地址 ----------
     if (-not $ClientApiHost) {
         if ($androidTarget -and $androidTarget -match '^emulator-') {
             $ClientApiHost = '10.0.2.2'
@@ -220,12 +219,12 @@ try {
             $ClientApiHost = Get-PrimaryIpv4Address
         }
     }
-
     $env:EXPO_PUBLIC_API_BASE_URL = "http://${ClientApiHost}:$ApiPort/api/v1"
     Write-Host "移动端 API：$env:EXPO_PUBLIC_API_BASE_URL" -ForegroundColor Green
     Write-Host "API 文档：http://localhost:$ApiPort/docs" -ForegroundColor DarkGray
     Write-Host "后端日志：$apiStdoutLog" -ForegroundColor DarkGray
 
+    # ---------- 6. 启动 Expo / Metro ----------
     Write-Step "启动 Expo/Metro（端口 $MetroPort）"
     $expoArguments = @('expo', 'start', '--port', $MetroPort)
     if ($ClearCache) {

@@ -1,20 +1,25 @@
 import { useEffect } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, useWindowDimensions } from 'react-native';
 import Animated, {
   Extrapolation,
+  clamp,
   interpolate,
+  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
 } from 'react-native-reanimated';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useFloatingTool } from './FloatingToolProvider';
 import { TOOLS, type FloatingTool } from './tools';
+import { BALL_SIZE, EDGE_MARGIN, TAP_THRESHOLD } from './config';
 
 export function FloatingBall() {
-  const { stage, openMenu, closeMenu, startCamera } = useFloatingTool();
+  const { stage, openMenu, closeMenu, startCamera, ballX, ballY } = useFloatingTool();
   const insets = useSafeAreaInsets();
+  const { width: screenW, height: screenH } = useWindowDimensions();
   const expanded = stage === 'menu';
   const progress = useSharedValue(0);
 
@@ -22,11 +27,69 @@ export function FloatingBall() {
     progress.value = withSpring(expanded ? 1 : 0, { damping: 18, stiffness: 220 });
   }, [expanded, progress]);
 
+  // 拖拽起始点（共享值，避免手势 context 的 TS 类型问题）
+  const startX = useSharedValue(0);
+  const startY = useSharedValue(0);
+
+  // 点击行为：菜单态→收起；半藏停靠态→先滑入全显再展开菜单；否则直接展开
+  const activateBall = () => {
+    if (stage === 'menu') {
+      closeMenu();
+      return;
+    }
+    const dockedLeft = ballX.value <= -BALL_SIZE / 2 + 1;
+    const dockedRight = ballX.value >= screenW - BALL_SIZE / 2 - 1;
+    if (dockedLeft) {
+      ballX.value = withSpring(EDGE_MARGIN, { damping: 20, stiffness: 200 });
+    } else if (dockedRight) {
+      ballX.value = withSpring(screenW - BALL_SIZE - EDGE_MARGIN, { damping: 20, stiffness: 200 });
+    }
+    openMenu();
+  };
+
+  const pan = Gesture.Pan()
+    .onStart(() => {
+      'worklet';
+      startX.value = ballX.value;
+      startY.value = ballY.value;
+      if (stage === 'menu') {
+        runOnJS(closeMenu)();
+      }
+    })
+    .onUpdate((event) => {
+      'worklet';
+      ballX.value = clamp(
+        startX.value + event.translationX,
+        -BALL_SIZE / 2,
+        screenW - BALL_SIZE / 2,
+      );
+      ballY.value = clamp(
+        startY.value + event.translationY,
+        insets.top,
+        screenH - BALL_SIZE - insets.bottom,
+      );
+    })
+    .onEnd((event) => {
+      'worklet';
+      const moved = Math.hypot(event.translationX, event.translationY);
+      if (moved < TAP_THRESHOLD) {
+        runOnJS(activateBall)();
+        return;
+      }
+      // 吸附到最近的左右竖边，球心对齐边缘 → 藏一半
+      const cx = ballX.value + BALL_SIZE / 2;
+      const targetX = cx < screenW / 2 ? -BALL_SIZE / 2 : screenW - BALL_SIZE / 2;
+      ballX.value = withSpring(targetX, { damping: 20, stiffness: 200 });
+    });
+
   const ballStyle = useAnimatedStyle(() => ({
-    transform: [{
-      rotate: `${interpolate(progress.value, [0, 1], [0, 135], Extrapolation.CLAMP)}deg`,
-    }],
+    transform: [
+      {
+        rotate: `${interpolate(progress.value, [0, 1], [0, 135], Extrapolation.CLAMP)}deg`,
+      },
+    ],
   }));
+
   const menuStyle = useAnimatedStyle(() => ({
     opacity: progress.value,
     transform: [
@@ -35,12 +98,16 @@ export function FloatingBall() {
     ],
   }));
 
+  const dragStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: ballX.value }, { translateY: ballY.value }],
+  }));
+
   const pickTool = (tool: FloatingTool) => {
     if (tool.enabled && tool.id === 'camera') startCamera();
   };
 
   return (
-    <View style={[styles.container, { bottom: insets.bottom + 76 }]} pointerEvents="box-none">
+    <Animated.View style={[styles.container, dragStyle]} pointerEvents="box-none">
       <Animated.View
         pointerEvents={expanded ? 'auto' : 'none'}
         style={[styles.menu, menuStyle]}>
@@ -59,20 +126,27 @@ export function FloatingBall() {
           </Pressable>
         ))}
       </Animated.View>
-      <Pressable
-        accessibilityLabel={expanded ? '收起工具' : '打开学习工具'}
-        hitSlop={14}
-        onPress={expanded ? closeMenu : openMenu}
-        style={styles.ball}>
-        <Animated.Text style={[styles.plus, ballStyle]}>＋</Animated.Text>
-      </Pressable>
-    </View>
+      <GestureDetector gesture={pan}>
+        <Animated.View
+          accessibilityRole="button"
+          accessibilityLabel={expanded ? '收起工具' : '打开学习工具'}
+          style={styles.ball}>
+          <Animated.Text style={[styles.plus, ballStyle]}>＋</Animated.Text>
+        </Animated.View>
+      </GestureDetector>
+    </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { position: 'absolute', right: 18, alignItems: 'flex-end', zIndex: 999 },
-  menu: { marginBottom: 14, alignItems: 'flex-end' },
+  // 容器仅作为球的定位锚点（菜单绝对定位，不影响布局），translate 即球左上角
+  container: { position: 'absolute', left: 0, top: 0, zIndex: 999 },
+  menu: {
+    position: 'absolute',
+    bottom: BALL_SIZE + 14,
+    right: 0,
+    alignItems: 'flex-end',
+  },
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -92,9 +166,9 @@ const styles = StyleSheet.create({
   disabled: { opacity: 0.52 },
   pressed: { opacity: 0.82 },
   ball: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
+    width: BALL_SIZE,
+    height: BALL_SIZE,
+    borderRadius: BALL_SIZE / 2,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#4E57C8',

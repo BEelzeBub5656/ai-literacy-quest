@@ -42,6 +42,10 @@ export const inlineKeywordDraftSchema = z.object({
   importance: z.number().int().min(1).max(3),
 }).strict();
 
+export const annotateTextResponseSchema = z.object({
+  keywords: z.array(inlineKeywordDraftSchema).max(8),
+}).strict();
+
 const evidenceRefSchema = z.object({
   type: z.enum(['message', 'card', 'course', 'concept', 'vision-result']),
   id: z.string(),
@@ -82,6 +86,7 @@ export type StudyChatResponse = z.infer<typeof studyChatResponseSchema>;
 export type KnowledgeCard = z.infer<typeof knowledgeCardSchema>;
 export type InlineKeywordDraft = z.infer<typeof inlineKeywordDraftSchema>;
 export type InlineKeywordItem = InlineKeywordDraft & { id: string };
+export type AnnotateTextResponse = z.infer<typeof annotateTextResponseSchema>;
 
 export type CompanionMessage = {
   id: string;

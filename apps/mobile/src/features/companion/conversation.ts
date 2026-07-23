@@ -1,6 +1,7 @@
 import type {
   CompanionMessage,
   ConversationSession,
+  InlineKeywordItem,
   KnowledgeCard,
 } from './contracts';
 
@@ -58,48 +59,48 @@ function relevantContextFor(
 
 export type DetailBranchLaunch = {
   session: ConversationSession;
-  requestMessages: CompanionMessage[];
-  assistantMessageId: string;
 };
+
+export function knowledgeCardContent(card: KnowledgeCard): string {
+  const relatedTerms = card.keywords.map((keyword) => keyword.text);
+  return [
+    card.plain_explanation,
+    ...card.key_points.map((point) => `• ${point}`),
+    ...(relatedTerms.length > 0 ? [`继续探索：${relatedTerms.join(' · ')}`] : []),
+  ].join('\n');
+}
+
+export function knowledgeCardKeywords(card: KnowledgeCard): InlineKeywordItem[] {
+  return card.keywords.map((keyword, index) => ({
+    id: `${card.card_id}-seed-keyword-${index}`,
+    text: keyword.text,
+    normalized_text: keyword.normalized_text,
+    importance: keyword.confidence >= 0.9 ? 3 : keyword.confidence >= 0.75 ? 2 : 1,
+  }));
+}
 
 export function createDetailBranch(
   sourceSession: ConversationSession,
   card: KnowledgeCard,
 ): DetailBranchLaunch {
   const sessionId = createConversationId('detail');
-  const userMessage: CompanionMessage = {
-    id: `message-user-${Date.now()}`,
-    role: 'user',
-    content: [
-      `我想详细了解知识点“${card.title}”。`,
-      `触发内容：${card.selected_text}`,
-      `卡片结论：${card.plain_explanation}`,
-      `关键要点：${card.key_points.slice(0, 2).join('；')}`,
-      '请结合随会话带入的来源上下文，先说明核心原理，再给一个容易理解的例子，最后提醒一个常见误区。',
-    ].join('\n'),
-  };
-  const assistantMessageId = `message-stream-${Date.now()}`;
-  const assistantMessage: CompanionMessage = {
-    id: assistantMessageId,
+  const seedMessage: CompanionMessage = {
+    id: `message-card-seed-${card.card_id}`,
     role: 'assistant',
-    content: '',
-    reasoning: '',
-    keywords: [],
-    isStreaming: true,
+    content: knowledgeCardContent(card),
+    reasoning: card.reasoning_summary,
+    keywords: knowledgeCardKeywords(card),
+    isStreaming: false,
   };
   const contextMessages = relevantContextFor(sourceSession, card);
   const session: ConversationSession = {
     id: sessionId,
-    title: `知识分支：${card.title}`,
-    messages: [userMessage, assistantMessage],
+    title: `引申：${card.title}`,
+    messages: [seedMessage],
     contextMessages,
     parentConversationId: sourceSession.id,
     sourceCardId: card.card_id,
   };
 
-  return {
-    session,
-    requestMessages: requestMessagesFor(session, [userMessage]),
-    assistantMessageId,
-  };
+  return { session };
 }

@@ -9,7 +9,9 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
-import type { CardNode, KnowledgeCard } from './contracts';
+import type { CardNode, InlineKeywordItem, KnowledgeCard } from './contracts';
+import { knowledgeCardKeywords } from './conversation';
+import { HighlightedText } from './HighlightedText';
 import { palette, radii, shadows, spacing } from '@/src/ui/theme';
 
 type Props = {
@@ -19,11 +21,13 @@ type Props = {
   expandedCardIds?: Set<string>;
   onClose?: () => void;
   onToggleExpand?: (cardId: string) => void;
-  onLearnMore?: (card: KnowledgeCard) => void;
+  onExtend?: (card: KnowledgeCard) => void;
   onStash: (cardId: string) => void;
   onRequestDelete: (cardId: string) => void;
   onCreateChildCard?: (parentCard: KnowledgeCard, text: string) => void;
+  onKeywordPress?: (card: KnowledgeCard, keyword: InlineKeywordItem) => void;
   inline?: boolean;
+  temporary?: boolean;
 };
 
 const SWIPE_THRESHOLD_RATIO = 0.22;
@@ -39,11 +43,13 @@ export function CompactKnowledgeCard({
   expandedCardIds,
   onClose,
   onToggleExpand,
-  onLearnMore,
+  onExtend,
   onStash,
   onRequestDelete,
   onCreateChildCard,
+  onKeywordPress,
   inline = false,
+  temporary = false,
 }: Props) {
   const { width, height } = useWindowDimensions();
   const offsetX = useSharedValue(0);
@@ -59,6 +65,7 @@ export function CompactKnowledgeCard({
   const maxRestingY = Math.max(0, (height - CARD_ESTIMATED_HEIGHT) / 2 - EDGE_GUARD);
 
   if (!card) return null;
+  const inlineKeywords = knowledgeCardKeywords(card);
 
   const pan = inline
     ? null
@@ -142,7 +149,9 @@ export function CompactKnowledgeCard({
       {!inline && <View style={styles.dragHandle} />}
 
       <View style={styles.header}>
-        <Text style={styles.badge}>知识卡片</Text>
+        <Text style={[styles.badge, temporary && styles.temporaryBadge]}>
+          {temporary ? '即时解释' : '知识卡片'}
+        </Text>
         {!inline && (
           <Text numberOfLines={1} style={styles.dragHint}>
             {modelLabel ? `${modelLabel} · 双指缩放` : '拖动位置 · 双指缩放'}
@@ -155,6 +164,18 @@ export function CompactKnowledgeCard({
             hitSlop={8}
             style={styles.inlineAction}>
             <Text style={styles.inlineActionText}>暂存</Text>
+          </Pressable>
+        )}
+        {onExtend && (
+          <Pressable
+            accessibilityLabel={`引申知识卡片 ${card.title}`}
+            hitSlop={8}
+            onPress={() => onExtend(card)}
+            style={({ pressed }) => [
+              styles.extendButton,
+              pressed && styles.extendButtonPressed,
+            ]}>
+            <Text style={styles.extendButtonText}>引申</Text>
           </Pressable>
         )}
         {inline && onClose && (
@@ -170,16 +191,41 @@ export function CompactKnowledgeCard({
       </View>
 
       <Text numberOfLines={inline ? undefined : 1} style={styles.title}>{card.title}</Text>
-      <Text numberOfLines={inline ? undefined : 3} style={styles.summary}>{card.plain_explanation}</Text>
+      <HighlightedText
+        text={card.plain_explanation}
+        keywords={inlineKeywords}
+        selectable
+        style={styles.summary}
+        onKeywordPress={(keyword) => onKeywordPress?.(card, keyword)}
+      />
 
       {card.key_points.length > 0 && (
         <View style={styles.points}>
           {card.key_points.slice(0, inline ? 3 : 2).map((point) => (
             <View key={point} style={styles.pointRow}>
               <View style={styles.pointDot} />
-              <Text numberOfLines={inline ? undefined : 1} style={styles.pointText}>{point}</Text>
+              <HighlightedText
+                text={point}
+                keywords={inlineKeywords}
+                selectable
+                style={styles.pointText}
+                onKeywordPress={(keyword) => onKeywordPress?.(card, keyword)}
+              />
             </View>
           ))}
+        </View>
+      )}
+
+      {inlineKeywords.length > 0 && (
+        <View style={styles.relatedTerms}>
+          <Text style={styles.relatedTermsLabel}>继续探索</Text>
+          <HighlightedText
+            text={inlineKeywords.map((keyword) => keyword.text).join(' · ')}
+            keywords={inlineKeywords}
+            selectable={false}
+            style={styles.relatedTermsText}
+            onKeywordPress={(keyword) => onKeywordPress?.(card, keyword)}
+          />
         </View>
       )}
 
@@ -187,17 +233,12 @@ export function CompactKnowledgeCard({
         <Pressable onPress={() => onStash(card.card_id)} style={styles.secondaryButton}>
           <Text style={styles.secondaryText}>暂存</Text>
         </Pressable>
-        {onLearnMore && !inline && (
-          <Pressable onPress={() => onLearnMore(card)} style={styles.primaryButton}>
-            <Text style={styles.primaryText}>详细了解</Text>
-          </Pressable>
-        )}
-        {inline && (
-          <Pressable onPress={() => onLearnMore?.(card)} style={[styles.primaryButton, { flex: 1 }]}>
-            <Text style={styles.primaryText}>深入会话</Text>
-          </Pressable>
-        )}
       </View>
+      {temporary && (
+        <Text style={styles.temporaryHint}>
+          关闭后不会保存；点击“引申”才会加入当前知识分支。
+        </Text>
+      )}
 
       {inline && onCreateChildCard && (
         <View style={styles.childComposer}>
@@ -294,19 +335,48 @@ const styles = StyleSheet.create({
   dragHandle: { width: 38, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: 9, backgroundColor: palette.border },
   header: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   badge: { color: '#237D68', fontSize: 10, fontWeight: '800', backgroundColor: palette.mintSoft, paddingHorizontal: 9, paddingVertical: 4, borderRadius: 99 },
+  temporaryBadge: { color: palette.indigo, backgroundColor: palette.surfaceSoft },
   dragHint: { flex: 1, textAlign: 'center', color: palette.faint, fontSize: 9, fontWeight: '700' },
   close: { color: palette.faint, fontSize: 24, lineHeight: 24, fontWeight: '600' },
   inlineAction: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 99, backgroundColor: palette.surfaceSoft },
   inlineActionText: { color: palette.indigo, fontSize: 10, fontWeight: '700' },
+  extendButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 99,
+    backgroundColor: palette.indigo,
+  },
+  extendButtonPressed: { opacity: 0.72 },
+  extendButtonText: { color: '#FFFFFF', fontSize: 10, fontWeight: '800' },
   title: { color: palette.ink, fontSize: 18, lineHeight: 24, fontWeight: '800', marginTop: 10 },
   summary: { color: palette.muted, fontSize: 13, lineHeight: 20, marginTop: 7 },
   points: { gap: 6, marginTop: 10 },
   pointRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   pointDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: palette.purple },
   pointText: { flex: 1, color: palette.ink, fontSize: 12, lineHeight: 18 },
+  relatedTerms: {
+    marginTop: 12,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: palette.border,
+  },
+  relatedTermsLabel: {
+    color: palette.faint,
+    fontSize: 9,
+    fontWeight: '800',
+    marginBottom: 5,
+  },
+  relatedTermsText: { color: palette.ink, fontSize: 12, lineHeight: 20 },
   actions: { flexDirection: 'row', gap: 10, marginTop: 15 },
   secondaryButton: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: radii.md, backgroundColor: palette.background },
   secondaryText: { color: palette.muted, fontSize: 12, fontWeight: '700' },
+  temporaryHint: {
+    color: palette.faint,
+    fontSize: 10,
+    lineHeight: 15,
+    marginTop: 8,
+    textAlign: 'center',
+  },
   primaryButton: { flex: 1.35, alignItems: 'center', paddingVertical: 10, borderRadius: radii.md, backgroundColor: palette.indigo },
   primaryText: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
   swipeCue: { position: 'absolute', top: '50%', marginTop: -18, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 99 },

@@ -2,3 +2,4 @@
 export const BALL_SIZE = 54; // 球直径（px）
 export const EDGE_MARGIN = 18; // 全显时距屏幕边的留白（px）
 export const TAP_THRESHOLD = 8; // 判定为「点击」而非「拖拽」的位移阈值（px）
+export const DEFAULT_BOTTOM_GAP = 136; // 避开底部导航和伴学输入区

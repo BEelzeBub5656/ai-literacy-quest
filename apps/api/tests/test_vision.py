@@ -6,7 +6,7 @@ from httpx import ASGITransport, AsyncClient
 from PIL import Image
 import pytest
 
-from campus_ai.core.config import get_settings
+from campus_ai.core.config import Settings, get_settings
 from campus_ai.main import app
 
 
@@ -37,6 +37,18 @@ def encoded_image(
         format=image_format,
     )
     return b64encode(stream.getvalue()).decode("ascii")
+
+
+def test_dashscope_standard_key_enables_real_vision_provider() -> None:
+    settings = Settings(
+        _env_file=None,
+        vision_provider="openai",
+        vision_openai_api_key=None,
+        dashscope_api_key="test-dashscope-key",
+    )
+
+    assert settings.resolved_vision_api_key == "test-dashscope-key"
+    assert settings.vision_configured is True
 
 
 @pytest.mark.asyncio

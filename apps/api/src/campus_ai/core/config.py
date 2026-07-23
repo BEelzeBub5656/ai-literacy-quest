@@ -74,6 +74,7 @@ class Settings(BaseSettings):
     deepseek_reasoning_effort: Literal["low", "medium", "high"] = "high"
 
     vision_provider: Literal["mock", "openai"] = "mock"
+    dashscope_api_key: str | None = None
     vision_openai_api_key: str | None = None
     vision_openai_base_url: str = (
         "https://dashscope.aliyuncs.com/compatible-mode/v1"
@@ -161,10 +162,15 @@ class Settings(BaseSettings):
     @property
     def vision_configured(self) -> bool:
         return self.vision_provider == "mock" or bool(
-            self.vision_openai_api_key
+            self.resolved_vision_api_key
             and self.vision_openai_base_url
             and self.vision_openai_model
         )
+
+    @property
+    def resolved_vision_api_key(self) -> str | None:
+        """Accept both the project-specific and DashScope-standard key names."""
+        return self.vision_openai_api_key or self.dashscope_api_key
 
     @computed_field
     @property

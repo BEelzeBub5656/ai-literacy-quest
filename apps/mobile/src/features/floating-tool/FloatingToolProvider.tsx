@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from 'react';
 import { BackHandler, StyleSheet, View, useWindowDimensions } from 'react-native';
-import { clamp, useSharedValue, withSpring, type SharedValue } from 'react-native-reanimated';
+import { clamp, useSharedValue, type SharedValue } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CameraScreen } from './camera/CameraScreen';
@@ -18,7 +18,7 @@ import { CropScreen } from './crop/CropScreen';
 import { FloatingBall } from './FloatingBall';
 import { ResultScreen } from './vision/ResultScreen';
 import type { VisionRecognizeResponse } from './vision/contracts';
-import { BALL_SIZE, EDGE_MARGIN } from './config';
+import { BALL_SIZE, DEFAULT_BOTTOM_GAP, EDGE_MARGIN } from './config';
 
 export type FloatingStage = 'idle' | 'menu' | 'camera' | 'crop' | 'result';
 
@@ -64,7 +64,7 @@ export function FloatingToolProvider({ children }: { children: ReactNode }) {
 
   useLayoutEffect(() => {
     const targetX = screenW - BALL_SIZE - EDGE_MARGIN;
-    const targetY = screenH - BALL_SIZE - (insets.bottom + 76);
+    const targetY = screenH - BALL_SIZE - (insets.bottom + DEFAULT_BOTTOM_GAP);
     if (!positioned.current) {
       ballX.value = targetX;
       ballY.value = targetY;
@@ -127,6 +127,8 @@ export function FloatingToolProvider({ children }: { children: ReactNode }) {
     croppedBase64,
     resultId,
     recognition,
+    ballX,
+    ballY,
     openMenu,
     closeMenu,
     startCamera,
@@ -141,6 +143,8 @@ export function FloatingToolProvider({ children }: { children: ReactNode }) {
     croppedBase64,
     resultId,
     recognition,
+    ballX,
+    ballY,
     openMenu,
     closeMenu,
     startCamera,

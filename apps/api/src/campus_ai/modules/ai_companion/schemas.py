@@ -97,6 +97,16 @@ class InlineKeywordCollection(StrictModel):
     keywords: list[InlineKeywordDraft] = Field(default_factory=list, max_length=8)
 
 
+class AnnotateTextRequest(StrictModel):
+    text: str = Field(min_length=1, max_length=8000)
+    source_context: str | None = Field(default=None, max_length=4000)
+    learner_context: str | None = Field(default=None, max_length=1000)
+
+
+class AnnotateTextResponse(StrictModel):
+    keywords: list[InlineKeywordDraft] = Field(default_factory=list, max_length=8)
+
+
 class EvidenceRef(StrictModel):
     type: Literal["message", "card", "course", "concept", "vision-result"]
     id: str = Field(min_length=1, max_length=100)
