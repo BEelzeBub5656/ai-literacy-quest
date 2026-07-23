@@ -1,7 +1,8 @@
 // 图谱画布：SVG 渲染节点 / 关系边，支持双指缩放、拖拽平移、点击命中与聚焦高亮。
-// 采用原生 React Native + react-native-svg 实现，无需 WebView，移动端 / Web 通用。
+// 性能优化：节点/边拆为 memo 化子组件，pan/zoom 时仅更新 <G transform> 字符串，
+// memo 子组件不会重渲染（props 不变），避免了整个 SVG 树重建。
 
-import { useEffect, useRef, useState } from 'react';
+import React, { memo, useEffect, useRef, useState } from 'react';
 import { View, type LayoutChangeEvent, StyleSheet } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Svg, { Circle, G, Line, Polygon, Text } from 'react-native-svg';
@@ -56,6 +57,162 @@ type Props = {
   onNodeDrag: (id: string, x: number, y: number) => void;
 };
 
+// ─── Memo 化的边组件 ───
+type EdgeItemProps = {
+  edge: KnowledgeEdge;
+  a: { x: number; y: number };
+  b: { x: number; y: number };
+  src: KnowledgeNode;
+  tgt: KnowledgeNode;
+  focusedNodeId: string | null;
+  showLabel: boolean;
+};
+
+const EdgeItem = memo(function EdgeItem({
+  edge,
+  a,
+  b,
+  src,
+  tgt,
+  focusedNodeId,
+  showLabel,
+}: EdgeItemProps) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const ux = dx / len;
+  const uy = dy / len;
+  const gap = 4;
+  const tailX = a.x + ux * (nodeRadius(src.importance) + gap);
+  const tailY = a.y + uy * (nodeRadius(src.importance) + gap);
+  const tipX = b.x - ux * (nodeRadius(tgt.importance) + gap);
+  const tipY = b.y - uy * (nodeRadius(tgt.importance) + gap);
+  const connected =
+    focusedNodeId !== null &&
+    (edge.source === focusedNodeId || edge.target === focusedNodeId);
+  const dim = focusedNodeId !== null && !connected;
+  const color = connected ? EDGE_HIGHLIGHT : EDGE_COLOR;
+  const strokeWidth = 0.8 + edge.weight * 0.35;
+  const dashed = edge.confidence < 0.6;
+  const opacity = dim ? 0.18 : 0.9;
+  return (
+    <G opacity={opacity}>
+      <Line
+        x1={tailX}
+        y1={tailY}
+        x2={tipX}
+        y2={tipY}
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeDasharray={dashed ? '6 5' : undefined}
+      />
+      {edge.directed && (
+        <Polygon
+          points={`${tipX},${tipY} ${tipX - ux * 9 - uy * 6},${tipY - uy * 9 + ux * 6} ${tipX - ux * 9 + uy * 6},${tipY - uy * 9 - ux * 6}`}
+          fill={color}
+        />
+      )}
+      {showLabel && (
+        <Text
+          x={(a.x + b.x) / 2}
+          y={(a.y + b.y) / 2 - 6}
+          fill={connected ? FOCUS_RING : MUTED}
+          fontSize={12}
+          textAnchor="middle"
+          fontWeight="700">
+          {relationLabel[edge.relation]}
+        </Text>
+      )}
+    </G>
+  );
+}, (prev, next) =>
+  prev.edge.id === next.edge.id &&
+  prev.a.x === next.a.x &&
+  prev.a.y === next.a.y &&
+  prev.b.x === next.b.x &&
+  prev.b.y === next.b.y &&
+  prev.focusedNodeId === next.focusedNodeId &&
+  prev.showLabel === next.showLabel);
+
+// ─── Memo 化的节点组件 ───
+type NodeItemProps = {
+  node: KnowledgeNode;
+  pos: { x: number; y: number };
+  isFocused: boolean;
+  isNeighbor: boolean;
+  isSelected: boolean;
+  isDragging: boolean;
+  focusedNodeId: string | null;
+};
+
+const NodeItem = memo(function NodeItem({
+  node,
+  pos,
+  isFocused,
+  isNeighbor,
+  isSelected,
+  isDragging,
+  focusedNodeId,
+}: NodeItemProps) {
+  const r = nodeRadius(node.importance);
+  const meta = categoryMeta[node.category];
+  const m = masteryMeta[node.mastery];
+  const dim = focusedNodeId !== null && !isNeighbor;
+  const showReview = node.review || node.mastery === 'review';
+  return (
+    <G
+      opacity={dim ? 0.25 : 1}
+      transform={`translate(${pos.x} ${pos.y})`}>
+      {isSelected && (
+        <Circle r={r + 8} fill="none" stroke={FOCUS_RING} strokeWidth={2} />
+      )}
+      {isDragging && (
+        <Circle r={r + 6} fill="none" stroke={FOCUS_RING} strokeWidth={2.5} strokeDasharray="4 3" />
+      )}
+      <Circle
+        r={r + 4}
+        fill="none"
+        stroke={m.ring}
+        strokeWidth={3}
+        strokeDasharray={m.dashed ? '5 4' : undefined}
+      />
+      <Circle r={r} fill={meta.color} />
+      {isFocused && <Circle r={r} fill="#FFFFFF" fillOpacity={0.12} />}
+      {showReview && (
+        <>
+          <Circle cx={r * 0.72} cy={-r * 0.72} r={8} fill={REVIEW_BADGE} />
+          <Text
+            x={r * 0.72}
+            y={-r * 0.72 + 4}
+            fill="#FFFFFF"
+            fontSize={11}
+            fontWeight="800"
+            textAnchor="middle">
+            !
+          </Text>
+        </>
+      )}
+      <Text
+        x={0}
+        y={r + 15}
+        fill={INK}
+        fontSize={12.5}
+        fontWeight="700"
+        textAnchor="middle">
+        {node.title}
+      </Text>
+    </G>
+  );
+}, (prev, next) =>
+  prev.node.id === next.node.id &&
+  prev.pos.x === next.pos.x &&
+  prev.pos.y === next.pos.y &&
+  prev.isFocused === next.isFocused &&
+  prev.isNeighbor === next.isNeighbor &&
+  prev.isSelected === next.isSelected &&
+  prev.isDragging === next.isDragging &&
+  prev.focusedNodeId === next.focusedNodeId);
+
 export function GraphCanvas(props: Props) {
   const {
     positions,
@@ -75,15 +232,17 @@ export function GraphCanvas(props: Props) {
   } = props;
 
   const [size, setSize] = useState<ViewSize>({ width: 0, height: 0 });
-  const [transform, setTransformState] = useState<Transform>({ scale: 1, tx: 0, ty: 0 });
+  // transform 用 React state，但 memo 子组件不会因此重渲染（props 不变）。
+  // 只有 <G transform="..."> 字符串变化，SVG 引擎高效处理。
+  const [transform, setTransform] = useState<Transform>({ scale: 1, tx: 0, ty: 0 });
   const transformRef = useRef(transform);
-  // 正在被拖拽的节点（用于视觉反馈）；ref 版本避免每帧重渲染。
+
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
   const draggingId = useRef<string | null>(null);
   const dragStart = useRef({ x: 0, y: 0 });
 
   const setT = (updater: Transform | ((prev: Transform) => Transform)) => {
-    setTransformState((prev) => {
+    setTransform((prev) => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
       transformRef.current = next;
       return next;
@@ -95,17 +254,15 @@ export function GraphCanvas(props: Props) {
     setSize((prev) => (prev.width === width && prev.height === height ? prev : { width, height }));
   };
 
-  // 首次获得尺寸或切换图谱时自适应铺满；resetToken 变化也重新铺满。
+  // 首次获得尺寸或切换图谱时自适应铺满
   useEffect(() => {
     if (!size.width || !size.height) return;
     const fit = fitTransform(positions, size);
-    if (fit) {
-      setT(fit);
-    }
+    if (fit) setT(fit);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [size.width, size.height, resetToken]);
 
-  // 搜索 / 聚焦请求：把目标节点平滑居中。
+  // 搜索 / 聚焦请求：把目标节点居中
   useEffect(() => {
     if (!focusRequest || !size.width) return;
     const next = centerOnNode(positions, size, focusRequest.nodeId, transformRef.current);
@@ -113,7 +270,7 @@ export function GraphCanvas(props: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusRequest?.token]);
 
-  // 命中检测：返回图空间 (gx,gy) 处最近的节点 id（含半径 + 容差），无则 null。
+  // 命中检测
   const findNodeAt = (gx: number, gy: number): string | null => {
     const scale = transformRef.current.scale;
     const tolPx = 9;
@@ -135,13 +292,11 @@ export function GraphCanvas(props: Props) {
   const handleTap = (gx: number, gy: number) => {
     const scale = transformRef.current.scale;
     const tolPx = 9;
-    // 1) 命中节点
     const hitNode = findNodeAt(gx, gy);
     if (hitNode) {
       onNodeTap(hitNode);
       return;
     }
-    // 2) 命中关系边（点到线段距离）
     const edgeTol = tolPx / scale;
     let bestEdge: string | null = null;
     let bestEdgeD = Infinity;
@@ -162,15 +317,15 @@ export function GraphCanvas(props: Props) {
     onBackgroundTap();
   };
 
+  // ─── 手势 ───
   const pinching = useRef(false);
   const pinchStartScale = useRef(1);
-
   const panStart = useRef({ tx: 0, ty: 0 });
+
   const pan = Gesture.Pan()
     .runOnJS(true)
     .onBegin((e) => {
       panStart.current = { tx: transformRef.current.tx, ty: transformRef.current.ty };
-      // 落点在节点上 → 进入「拖节点」模式；否则平移画布。
       const t = transformRef.current;
       const gx = (e.x - t.tx) / t.scale;
       const gy = (e.y - t.ty) / t.scale;
@@ -187,7 +342,6 @@ export function GraphCanvas(props: Props) {
     .onUpdate((e) => {
       if (pinching.current) return;
       if (draggingId.current) {
-        // 以图空间坐标更新节点覆盖：平移量除以当前缩放。
         const s = transformRef.current.scale;
         onNodeDrag(
           draggingId.current,
@@ -196,7 +350,11 @@ export function GraphCanvas(props: Props) {
         );
         return;
       }
-      setT((t) => ({ ...t, tx: panStart.current.tx + e.translationX, ty: panStart.current.ty + e.translationY }));
+      setT((t) => ({
+        ...t,
+        tx: panStart.current.tx + e.translationX,
+        ty: panStart.current.ty + e.translationY,
+      }));
     })
     .onEnd(() => {
       draggingId.current = null;
@@ -240,8 +398,8 @@ export function GraphCanvas(props: Props) {
       <View style={styles.canvas} onLayout={onLayout}>
         {size.width > 0 && (
           <Svg width={size.width} height={size.height} style={styles.svg}>
+            {/* 只有 transform 字符串变化，memo 子组件不重渲染 */}
             <G transform={`translate(${transform.tx} ${transform.ty}) scale(${transform.scale})`}>
-              {/* 关系边 */}
               {edges.map((e) => {
                 const a = positions[e.source];
                 const b = positions[e.target];
@@ -249,119 +407,33 @@ export function GraphCanvas(props: Props) {
                 const src = nodeById.get(e.source);
                 const tgt = nodeById.get(e.target);
                 if (!src || !tgt) return null;
-                const dx = b.x - a.x;
-                const dy = b.y - a.y;
-                const len = Math.hypot(dx, dy) || 1;
-                const ux = dx / len;
-                const uy = dy / len;
-                const gap = 4;
-                const tailX = a.x + ux * (nodeRadius(src.importance) + gap);
-                const tailY = a.y + uy * (nodeRadius(src.importance) + gap);
-                const tipX = b.x - ux * (nodeRadius(tgt.importance) + gap);
-                const tipY = b.y - uy * (nodeRadius(tgt.importance) + gap);
-                const connected =
-                  focusedNodeId !== null &&
-                  (e.source === focusedNodeId || e.target === focusedNodeId);
-                const dim = focusedNodeId !== null && !connected;
-                const color = connected ? EDGE_HIGHLIGHT : EDGE_COLOR;
-                const strokeWidth = (0.8 + e.weight * 0.35) ;
-                const dashed = e.confidence < 0.6;
-                const opacity = dim ? 0.18 : 0.9;
                 return (
-                  <G key={e.id} opacity={opacity}>
-                    <Line
-                      x1={tailX}
-                      y1={tailY}
-                      x2={tipX}
-                      y2={tipY}
-                      stroke={color}
-                      strokeWidth={strokeWidth}
-                      strokeDasharray={dashed ? '6 5' : undefined}
-                    />
-                    {e.directed && (
-                      <Polygon
-                        points={`${tipX},${tipY} ${tipX - ux * 9 - uy * 6},${tipY - uy * 9 + ux * 6} ${tipX - ux * 9 + uy * 6},${tipY - uy * 9 - ux * 6}`}
-                        fill={color}
-                      />
-                    )}
-                    {showEdgeLabel(e) && (
-                      <Text
-                        x={(a.x + b.x) / 2}
-                        y={(a.y + b.y) / 2 - 6}
-                        fill={connected ? FOCUS_RING : MUTED}
-                        fontSize={12}
-                        textAnchor="middle"
-                        fontWeight="700">
-                        {relationLabel[e.relation]}
-                      </Text>
-                    )}
-                  </G>
+                  <EdgeItem
+                    key={e.id}
+                    edge={e}
+                    a={a}
+                    b={b}
+                    src={src}
+                    tgt={tgt}
+                    focusedNodeId={focusedNodeId}
+                    showLabel={showEdgeLabel(e)}
+                  />
                 );
               })}
-
-              {/* 节点 */}
               {nodes.map((n) => {
                 const p = positions[n.id];
                 if (!p) return null;
-                const r = nodeRadius(n.importance);
-                const meta = categoryMeta[n.category];
-                const m = masteryMeta[n.mastery];
-                const isFocused = focusedNodeId === n.id;
-                const isNeighbor = neighbors.has(n.id);
-                const dim = focusedNodeId !== null && !isNeighbor;
-                const isSelected = selectedNodeId === n.id;
-                const isDragging = draggingNodeId === n.id;
-                const showReview = n.review || n.mastery === 'review';
                 return (
-                  <G
+                  <NodeItem
                     key={n.id}
-                    opacity={dim ? 0.25 : 1}
-                    transform={`translate(${p.x} ${p.y})`}>
-                    {/* 选中高亮外圈 */}
-                    {isSelected && (
-                      <Circle r={r + 8} fill="none" stroke={FOCUS_RING} strokeWidth={2} />
-                    )}
-                    {/* 拖拽中外圈 */}
-                    {isDragging && (
-                      <Circle r={r + 6} fill="none" stroke={FOCUS_RING} strokeWidth={2.5} strokeDasharray="4 3" />
-                    )}
-                    {/* 掌握状态外圈 */}
-                    <Circle
-                      r={r + 4}
-                      fill="none"
-                      stroke={m.ring}
-                      strokeWidth={3}
-                      strokeDasharray={m.dashed ? '5 4' : undefined}
-                    />
-                    {/* 分类填充 */}
-                    <Circle r={r} fill={meta.color} />
-                    <Circle r={r} fill="#FFFFFF" fillOpacity={isFocused ? 0.12 : 0.0} />
-                    {/* 复习标记 */}
-                    {showReview && (
-                      <>
-                        <Circle cx={r * 0.72} cy={-r * 0.72} r={8} fill={REVIEW_BADGE} />
-                        <Text
-                          x={r * 0.72}
-                          y={-r * 0.72 + 4}
-                          fill="#FFFFFF"
-                          fontSize={11}
-                          fontWeight="800"
-                          textAnchor="middle">
-                          !
-                        </Text>
-                      </>
-                    )}
-                    {/* 标签 */}
-                    <Text
-                      x={0}
-                      y={r + 15}
-                      fill={INK}
-                      fontSize={12.5}
-                      fontWeight="700"
-                      textAnchor="middle">
-                      {n.title}
-                    </Text>
-                  </G>
+                    node={n}
+                    pos={p}
+                    isFocused={focusedNodeId === n.id}
+                    isNeighbor={neighbors.has(n.id)}
+                    isSelected={selectedNodeId === n.id}
+                    isDragging={draggingNodeId === n.id}
+                    focusedNodeId={focusedNodeId}
+                  />
                 );
               })}
             </G>

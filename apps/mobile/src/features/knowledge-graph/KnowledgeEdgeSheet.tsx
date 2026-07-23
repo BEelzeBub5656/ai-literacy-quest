@@ -21,14 +21,20 @@ export function KnowledgeEdgeSheet({ edge, sourceNode, targetNode, onClose }: Pr
             <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
               <View style={styles.handle} />
               <View style={styles.relRow}>
-                <Text style={styles.nodeName}>{sourceNode?.title ?? edge.source}</Text>
-                <View style={styles.relChip}>
-                  <Text style={styles.relChipText}>
-                    {edge.directed ? '─→ ' : '— '}
-                    {relationLabel[edge.relation]}
-                  </Text>
+                <View style={styles.nodeChip}>
+                  <Text style={styles.nodeName} numberOfLines={1}>{sourceNode?.title ?? edge.source}</Text>
                 </View>
-                <Text style={styles.nodeName}>{targetNode?.title ?? edge.target}</Text>
+                <View style={styles.relArrow}>
+                  <Text style={styles.relArrowText}>{edge.directed ? '→' : '↔'}</Text>
+                  <View style={styles.relLabel}>
+                    <Text style={styles.relLabelText}>
+                      {relationLabel[edge.relation]}
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.nodeChip}>
+                  <Text style={styles.nodeName} numberOfLines={1}>{targetNode?.title ?? edge.target}</Text>
+                </View>
               </View>
 
               <View style={styles.statRow}>
@@ -52,12 +58,15 @@ export function KnowledgeEdgeSheet({ edge, sourceNode, targetNode, onClose }: Pr
                 <View key={`${ref.id}-${i}`} style={styles.sourceRow}>
                   <Text style={styles.sourceLabel}>{ref.label ?? ref.id}</Text>
                   {ref.selectedText && (
-                    <Text style={styles.sourceQuote}>“{ref.selectedText}”</Text>
+                    <Text style={styles.sourceQuote}>{"\u201c"}{ref.selectedText}{"\u201d"}</Text>
                   )}
                 </View>
               ))}
 
-              <Pressable accessibilityRole="button" style={styles.closeBtn} onPress={onClose}>
+              <Pressable
+                accessibilityRole="button"
+                style={({ pressed }) => [styles.closeBtn, pressed && styles.closePressed]}
+                onPress={onClose}>
                 <Text style={styles.closeText}>关闭</Text>
               </Pressable>
             </ScrollView>
@@ -68,13 +77,22 @@ export function KnowledgeEdgeSheet({ edge, sourceNode, targetNode, onClose }: Pr
   );
 }
 
+const sheetShadow = {
+  shadowColor: '#26305C',
+  shadowOpacity: 0.15,
+  shadowRadius: 20,
+  shadowOffset: { width: 0, height: -4 },
+  elevation: 8,
+};
+
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(24,32,51,0.35)', justifyContent: 'flex-end' },
+  backdrop: { flex: 1, backgroundColor: 'rgba(24,32,51,0.4)', justifyContent: 'flex-end' },
   sheet: {
     backgroundColor: palette.surface,
     borderTopLeftRadius: radii.xl,
     borderTopRightRadius: radii.xl,
     maxHeight: '70%',
+    ...sheetShadow,
   },
   content: { padding: spacing.lg, paddingBottom: spacing.xl },
   handle: {
@@ -92,9 +110,20 @@ const styles = StyleSheet.create({
     gap: 8,
     flexWrap: 'wrap',
   },
-  nodeName: { color: palette.ink, fontSize: 16, fontWeight: '800', textAlign: 'center' },
-  relChip: { backgroundColor: palette.surfaceSoft, borderRadius: 99, paddingHorizontal: 10, paddingVertical: 5 },
-  relChipText: { color: palette.indigo, fontSize: 13, fontWeight: '800' },
+  nodeChip: {
+    flexShrink: 1,
+    maxWidth: '38%',
+    backgroundColor: palette.surfaceSoft,
+    borderRadius: radii.md,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    alignItems: 'center',
+  },
+  nodeName: { color: palette.ink, fontSize: 14, fontWeight: '800', textAlign: 'center' },
+  relArrow: { alignItems: 'center', gap: 4 },
+  relArrowText: { color: palette.indigo, fontSize: 20, fontWeight: '800' },
+  relLabel: { backgroundColor: palette.indigo, borderRadius: 99, paddingHorizontal: 8, paddingVertical: 3 },
+  relLabelText: { color: '#FFFFFF', fontSize: 11, fontWeight: '800' },
   statRow: { flexDirection: 'row', gap: 10, marginTop: spacing.lg },
   statBox: {
     flex: 1,
@@ -128,5 +157,6 @@ const styles = StyleSheet.create({
     borderColor: palette.border,
     alignItems: 'center',
   },
+  closePressed: { opacity: 0.7 },
   closeText: { color: palette.ink, fontSize: 14, fontWeight: '800' },
 });

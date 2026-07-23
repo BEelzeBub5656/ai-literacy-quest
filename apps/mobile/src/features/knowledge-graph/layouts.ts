@@ -10,7 +10,7 @@ const DEFAULT_SIZE = 1000;
 
 /**
  * 力导向布局（Fruchterman-Reingold 风格）：
- * 节点间斥力 + 边弹簧引力 + 向心力，迭代收敛后停止（设计文档 19.3：稳定后不再模拟）。
+ * 节点间斥力 + 边弹簧引力 + 向心力，迭代收敛后停止。
  * 初始位置用确定性环形分布，保证每次打开布局稳定、不抖动。
  */
 export function forceLayout(
@@ -20,7 +20,7 @@ export function forceLayout(
 ): Positions {
   const n = nodeIds.length;
   const size = options?.size ?? DEFAULT_SIZE;
-  const iterations = options?.iterations ?? 320;
+  const iterations = options?.iterations ?? 120;
   if (n === 0) return {};
 
   const pos: Positions = {};
@@ -32,13 +32,15 @@ export function forceLayout(
     vel[id] = { x: 0, y: 0 };
   });
 
-  const k = size / Math.sqrt(Math.max(n, 1)); // 理想边长
+  const k = size / Math.sqrt(Math.max(n, 1));
   const repulse = 7200;
   const spring = 0.045;
   const gravity = 0.02;
   const damping = 0.86;
 
   for (let it = 0; it < iterations; it++) {
+    // 温度冷却：前 60% 迭代用全力度，后 40% 逐步降温以收敛。
+    const temp = it < iterations * 0.6 ? 1 : (iterations - it) / (iterations * 0.4);
     const force: Positions = {};
     nodeIds.forEach((id) => (force[id] = { x: 0, y: 0 }));
 
@@ -84,8 +86,8 @@ export function forceLayout(
       const fr = force[id];
       fr.x += -p.x * gravity;
       fr.y += -p.y * gravity;
-      v.x = (v.x + fr.x) * damping;
-      v.y = (v.y + fr.y) * damping;
+      v.x = (v.x + fr.x * temp) * damping;
+      v.y = (v.y + fr.y * temp) * damping;
       p.x += v.x;
       p.y += v.y;
     });
@@ -110,7 +112,7 @@ export function forceLayout(
 
 /**
  * 层级布局（学习路径）：仅使用前置 / 包含关系，按最长路径分配层级，
- * 自上而下分层排列（设计文档 4.2 / 13.3）。
+ * 自上而下分层排列。
  */
 export function layeredLayout(
   nodeIds: string[],
@@ -120,16 +122,13 @@ export function layeredLayout(
   const hierarchy = edges.filter((e) => hierarchyRelations.includes(e.relation));
   const indeg = new Map<string, number>();
   const children = new Map<string, string[]>();
-  const parents = new Map<string, string[]>();
   nodeIds.forEach((id) => {
     indeg.set(id, 0);
     children.set(id, []);
-    parents.set(id, []);
   });
   for (const e of hierarchy) {
     if (!children.has(e.source) || !children.has(e.target)) continue;
     children.get(e.source)!.push(e.target);
-    parents.get(e.target)!.push(e.source);
     indeg.set(e.target, (indeg.get(e.target) ?? 0) + 1);
   }
 
@@ -151,7 +150,6 @@ export function layeredLayout(
       if ((indeg.get(v) ?? 0) === 0) queue.push(v);
     }
   }
-  // 未连通（环 / 孤立）节点归入第 0 层
   nodeIds.forEach((id) => {
     if (!level.has(id)) level.set(id, 0);
   });

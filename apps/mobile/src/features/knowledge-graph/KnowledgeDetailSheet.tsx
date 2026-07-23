@@ -22,6 +22,7 @@ const TYPE_LABEL: Record<string, string> = {
   'knowledge-card': '知识卡',
   experiment: '实验',
   manual: '手动',
+  'vision-result': '识物',
 };
 
 export function KnowledgeDetailSheet({ node, relatedCount, onClose, onAsk, onContinue }: Props) {
@@ -34,20 +35,25 @@ export function KnowledgeDetailSheet({ node, relatedCount, onClose, onAsk, onCon
           {node && (
             <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
               <View style={styles.handle} />
-              <View style={styles.titleRow}>
+              <View style={styles.headerRow}>
+                <View style={[styles.catIndicator, { backgroundColor: categoryMeta[node.category].color }]} />
                 <Text style={styles.title}>{node.title}</Text>
-                <View style={[styles.pill, { backgroundColor: masteryMeta[node.mastery].ring }]}>
-                  <Text style={styles.pillText}>{masteryMeta[node.mastery].label}</Text>
+                <View style={[styles.masteryPill, { backgroundColor: masteryMeta[node.mastery].ring }]}>
+                  <Text style={styles.masteryText}>{masteryMeta[node.mastery].label}</Text>
                 </View>
               </View>
 
-              <View style={styles.categoryRow}>
-                <View style={[styles.catDot, { backgroundColor: categoryMeta[node.category].color }]} />
-                <Text style={styles.catText}>{categoryMeta[node.category].label}</Text>
-                <Text style={styles.dot}>·</Text>
-                <Text style={styles.metaText}>关联知识 {relatedCount}</Text>
-                <Text style={styles.dot}>·</Text>
-                <Text style={styles.metaText}>来源记录 {node.sourceRefs.length}</Text>
+              <View style={styles.metaRow}>
+                <View style={styles.metaChip}>
+                  <View style={[styles.metaDot, { backgroundColor: categoryMeta[node.category].color }]} />
+                  <Text style={styles.metaText}>{categoryMeta[node.category].label}</Text>
+                </View>
+                <View style={styles.metaChip}>
+                  <Text style={styles.metaText}>关联 {relatedCount}</Text>
+                </View>
+                <View style={styles.metaChip}>
+                  <Text style={styles.metaText}>来源 {node.sourceRefs.length}</Text>
+                </View>
               </View>
 
               <Text style={styles.summary}>{node.summary}</Text>
@@ -72,24 +78,30 @@ export function KnowledgeDetailSheet({ node, relatedCount, onClose, onAsk, onCon
                   <View style={styles.sourceBody}>
                     <Text style={styles.sourceLabel}>{ref.label ?? ref.id}</Text>
                     {ref.selectedText && (
-                      <Text style={styles.sourceQuote}>“{ref.selectedText}”</Text>
+                      <Text style={styles.sourceQuote}>{"\u201c"}{ref.selectedText}{"\u201d"}</Text>
                     )}
                   </View>
                 </View>
               ))}
 
               <View style={styles.actions}>
-                <Pressable accessibilityRole="button" style={styles.actionBtn} onPress={() => setShowCard((v) => !v)}>
-                  <Text style={styles.actionText}>{showCard ? '收起知识卡' : '查看知识卡'}</Text>
+                <Pressable
+                  accessibilityRole="button"
+                  style={({ pressed }) => [styles.actionBtn, pressed && styles.actionPressed]}
+                  onPress={() => setShowCard((v) => !v)}>
+                  <Text style={styles.actionText}>{showCard ? '收起卡片' : '查看卡片'}</Text>
                 </Pressable>
-                <Pressable accessibilityRole="button" style={styles.actionBtn} onPress={() => onContinue(node)}>
+                <Pressable
+                  accessibilityRole="button"
+                  style={({ pressed }) => [styles.actionBtn, pressed && styles.actionPressed]}
+                  onPress={() => onContinue(node)}>
                   <Text style={styles.actionText}>继续学习</Text>
                 </Pressable>
                 <Pressable
                   accessibilityRole="button"
-                  style={[styles.actionBtn, styles.actionPrimary]}
+                  style={({ pressed }) => [styles.actionBtn, styles.actionPrimary, pressed && styles.actionPressed]}
                   onPress={() => onAsk(node)}>
-                  <Text style={[styles.actionText, styles.actionPrimaryText]}>围绕它提问</Text>
+                  <Text style={[styles.actionText, styles.actionPrimaryText]}>围绕提问</Text>
                 </Pressable>
               </View>
             </ScrollView>
@@ -100,13 +112,22 @@ export function KnowledgeDetailSheet({ node, relatedCount, onClose, onAsk, onCon
   );
 }
 
+const sheetShadow = {
+  shadowColor: '#26305C',
+  shadowOpacity: 0.15,
+  shadowRadius: 20,
+  shadowOffset: { width: 0, height: -4 },
+  elevation: 8,
+};
+
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(24,32,51,0.35)', justifyContent: 'flex-end' },
+  backdrop: { flex: 1, backgroundColor: 'rgba(24,32,51,0.4)', justifyContent: 'flex-end' },
   sheet: {
     backgroundColor: palette.surface,
     borderTopLeftRadius: radii.xl,
     borderTopRightRadius: radii.xl,
     maxHeight: '82%',
+    ...sheetShadow,
   },
   content: { padding: spacing.lg, paddingBottom: spacing.xl },
   handle: {
@@ -117,15 +138,23 @@ const styles = StyleSheet.create({
     backgroundColor: palette.border,
     marginBottom: spacing.md,
   },
-  titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
-  title: { flex: 1, color: palette.ink, fontSize: 22, fontWeight: '800' },
-  pill: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 99 },
-  pillText: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
-  categoryRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10, flexWrap: 'wrap' },
-  catDot: { width: 10, height: 10, borderRadius: 5 },
-  catText: { color: palette.muted, fontSize: 13, fontWeight: '700' },
-  dot: { color: palette.faint, fontSize: 13 },
-  metaText: { color: palette.muted, fontSize: 13 },
+  headerRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  catIndicator: { width: 4, height: 28, borderRadius: 2 },
+  title: { flex: 1, color: palette.ink, fontSize: 21, fontWeight: '800' },
+  masteryPill: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 99 },
+  masteryText: { color: '#FFFFFF', fontSize: 11, fontWeight: '800' },
+  metaRow: { flexDirection: 'row', gap: 8, marginTop: 12, flexWrap: 'wrap' },
+  metaChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: palette.surfaceSoft,
+    borderRadius: 99,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  metaDot: { width: 8, height: 8, borderRadius: 4 },
+  metaText: { color: palette.muted, fontSize: 12, fontWeight: '600' },
   summary: { color: palette.ink, fontSize: 15, lineHeight: 23, marginTop: spacing.md },
   cardPreview: {
     marginTop: spacing.md,
@@ -162,6 +191,7 @@ const styles = StyleSheet.create({
     borderColor: palette.border,
     alignItems: 'center',
   },
+  actionPressed: { opacity: 0.7 },
   actionPrimary: { backgroundColor: palette.indigo, borderColor: palette.indigo },
   actionText: { color: palette.ink, fontSize: 13, fontWeight: '800' },
   actionPrimaryText: { color: '#FFFFFF' },

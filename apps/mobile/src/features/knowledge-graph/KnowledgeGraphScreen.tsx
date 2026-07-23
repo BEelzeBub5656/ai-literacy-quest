@@ -1,14 +1,7 @@
 // 类 Obsidian 知识关系图谱主屏（设计文档第 4 / 5 / 12 / 13 节）。
 // 集成到「我的」标签页：顶部统计 + 三视图切换 + 搜索 + 画布 + 详情 / 关系 / 筛选面板。
-import { useMemo, useState } from 'react';
-import {
-  FlatList,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { memo, useMemo, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 
@@ -27,6 +20,24 @@ const MODES: { key: GraphMode; label: string }[] = [
   { key: 'path', label: '学习路径' },
   { key: 'weak', label: '我的薄弱点' },
 ];
+
+const SearchResultItem = memo(function SearchResultItem({
+  node,
+  onSelect,
+}: {
+  node: KnowledgeNode;
+  onSelect: (node: KnowledgeNode) => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      style={({ pressed }) => [styles.searchResultItem, pressed && styles.searchResultPressed]}
+      onPress={() => onSelect(node)}>
+      <View style={[styles.searchResultDot, { backgroundColor: categoryMeta[node.category].color }]} />
+      <Text style={styles.searchResultText} numberOfLines={1}>{node.title}</Text>
+    </Pressable>
+  );
+});
 
 export function KnowledgeGraphScreen() {
   const workspace = useKnowledgeWorkspace();
@@ -78,47 +89,57 @@ export function KnowledgeGraphScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
+      {/* 紧凑头部 */}
       <View style={styles.header}>
-        <Pressable accessibilityRole="button" onPress={() => router.back()} style={styles.backRow}>
-          <Text style={styles.backText}>‹ 返回我的</Text>
-        </Pressable>
-        <View style={styles.headerTop}>
-          <View>
-            <Text style={styles.eyebrow}>我的学习空间</Text>
-            <Text style={styles.title}>知识关系图谱</Text>
+        <View style={styles.headerRow}>
+          <Pressable accessibilityRole="button" onPress={() => router.back()} style={styles.backBtn}>
+            <Text style={styles.backText}>‹</Text>
+          </Pressable>
+          <View style={styles.headerCenter}>
+            <Text style={styles.eyebrow}>知识图谱</Text>
+            <Text style={styles.title}>关系网络</Text>
           </View>
-          <View style={styles.statBadge}>
-            <Text style={styles.statBadgeValue}>{stats.pct}%</Text>
-            <Text style={styles.statBadgeLabel}>已掌握</Text>
+          <View style={styles.progressBadge}>
+            <Text style={styles.progressValue}>{stats.pct}%</Text>
+            <Text style={styles.progressLabel}>已掌握</Text>
           </View>
         </View>
         <View style={styles.statRow}>
-          <Text style={styles.statItem}>知识点 {stats.nodes}</Text>
-          <Text style={styles.statDot}>·</Text>
-          <Text style={styles.statItem}>关系 {stats.edges}</Text>
-          <Text style={styles.statDot}>·</Text>
-          <Text style={styles.statItem}>待复习 {stats.review}</Text>
+          <View style={styles.statPill}>
+            <Text style={styles.statNum}>{stats.nodes}</Text>
+            <Text style={styles.statLabel}>知识点</Text>
+          </View>
+          <View style={styles.statPill}>
+            <Text style={styles.statNum}>{stats.edges}</Text>
+            <Text style={styles.statLabel}>关系</Text>
+          </View>
+          <View style={styles.statPill}>
+            <Text style={styles.statNum}>{stats.review}</Text>
+            <Text style={styles.statLabel}>待复习</Text>
+          </View>
         </View>
       </View>
 
-      {/* 三视图切换 */}
-      <View style={styles.segment}>
-        {MODES.map((m) => {
-          const active = g.mode === m.key;
-          return (
-            <Pressable
-              key={m.key}
-              accessibilityRole="button"
-              style={[styles.segmentItem, active && styles.segmentItemActive]}
-              onPress={() => g.setMode(m.key)}>
-              <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{m.label}</Text>
-            </Pressable>
-          );
-        })}
-      </View>
-
-      {/* 搜索 */}
-      <View style={styles.searchWrap}>
+      {/* 视图切换 + 搜索 合并行 */}
+      <View style={styles.toolbar}>
+        <View style={styles.segment}>
+          {MODES.map((m) => {
+            const active = g.mode === m.key;
+            return (
+              <Pressable
+                key={m.key}
+                accessibilityRole="button"
+                style={({ pressed }) => [
+                  styles.segmentItem,
+                  active && styles.segmentItemActive,
+                  pressed && styles.segmentPressed,
+                ]}
+                onPress={() => g.setMode(m.key)}>
+                <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{m.label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
         <View style={styles.searchBox}>
           <Text style={styles.searchIcon}>⌕</Text>
           <TextInput
@@ -129,7 +150,7 @@ export function KnowledgeGraphScreen() {
             onChangeText={g.setSearch}
           />
           {g.search.length > 0 && (
-            <Pressable accessibilityRole="button" onPress={() => g.setSearch('')}>
+            <Pressable accessibilityRole="button" onPress={() => g.setSearch('')} hitSlop={8}>
               <Text style={styles.searchClear}>✕</Text>
             </Pressable>
           )}
@@ -157,14 +178,23 @@ export function KnowledgeGraphScreen() {
 
         {/* 画布右上角悬浮操作 */}
         <View style={styles.canvasActions}>
-          <Pressable accessibilityRole="button" style={styles.roundBtn} onPress={() => setShowFilters(true)}>
-            <Text style={styles.roundBtnText}>筛选</Text>
+          <Pressable
+            accessibilityRole="button"
+            style={({ pressed }) => [styles.fabBtn, pressed && styles.fabPressed]}
+            onPress={() => setShowFilters(true)}>
+            <Text style={styles.fabText}>筛选</Text>
           </Pressable>
-          <Pressable accessibilityRole="button" style={styles.roundBtn} onPress={() => setResetToken((t) => t + 1)}>
-            <Text style={styles.roundBtnText}>复位</Text>
+          <Pressable
+            accessibilityRole="button"
+            style={({ pressed }) => [styles.fabBtn, pressed && styles.fabPressed]}
+            onPress={() => setResetToken((t) => t + 1)}>
+            <Text style={styles.fabText}>复位</Text>
           </Pressable>
-          <Pressable accessibilityRole="button" style={styles.roundBtn} onPress={() => setShowLegend((v) => !v)}>
-            <Text style={styles.roundBtnText}>图例</Text>
+          <Pressable
+            accessibilityRole="button"
+            style={({ pressed }) => [styles.fabBtn, pressed && styles.fabPressed]}
+            onPress={() => setShowLegend((v) => !v)}>
+            <Text style={styles.fabText}>图例</Text>
           </Pressable>
         </View>
 
@@ -180,26 +210,21 @@ export function KnowledgeGraphScreen() {
             ))}
             <View style={styles.legendDivider} />
             <Text style={styles.legendTitle}>掌握状态</Text>
-            <Text style={styles.legendHint}>实线=已理解 · 虚线=学习中/待复习 · ! = 需复习</Text>
+            <Text style={styles.legendHint}>实线=已理解 · 虚线=学习中/待复习</Text>
           </View>
         )}
 
         {/* 搜索结果下拉 */}
         {g.searchMatches.length > 0 && (
           <View style={styles.searchResults}>
-            <FlatList
-              data={g.searchMatches}
-              keyExtractor={(item) => item.id}
-              renderItem={({ item }) => (
-                <Pressable
-                  accessibilityRole="button"
-                  style={styles.searchResultItem}
-                  onPress={() => selectSearchResult(item)}>
-                  <View style={[styles.searchResultDot, { backgroundColor: categoryMeta[item.category].color }]} />
-                  <Text style={styles.searchResultText}>{item.title}</Text>
-                </Pressable>
-              )}
-            />
+            <ScrollView
+              style={styles.searchResultsScroll}
+              contentContainerStyle={styles.searchResultsContent}
+              keyboardShouldPersistTaps="handled">
+              {g.searchMatches.map((item) => (
+                <SearchResultItem key={item.id} node={item} onSelect={selectSearchResult} />
+              ))}
+            </ScrollView>
           </View>
         )}
       </View>
@@ -229,63 +254,84 @@ export function KnowledgeGraphScreen() {
   );
 }
 
-const shadows = {
+const cardShadow = {
   shadowColor: '#26305C',
-  shadowOpacity: 0.1,
-  shadowRadius: 10,
+  shadowOpacity: 0.08,
+  shadowRadius: 12,
   shadowOffset: { width: 0, height: 4 },
   elevation: 3,
 };
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: palette.background },
+  // ─── 头部 ───
   header: { paddingHorizontal: spacing.lg, paddingTop: spacing.md },
-  backRow: { alignSelf: 'flex-start', paddingVertical: 4, paddingRight: 12 },
-  backText: { color: palette.indigo, fontSize: 13, fontWeight: '800' },
-  headerTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  eyebrow: { color: palette.indigo, fontSize: 13, fontWeight: '700' },
-  title: { color: palette.ink, fontSize: 26, fontWeight: '800', marginTop: 4 },
-  statBadge: {
+  headerRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  backBtn: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: palette.surface, ...cardShadow },
+  backText: { color: palette.indigo, fontSize: 22, fontWeight: '800' },
+  headerCenter: { flex: 1 },
+  eyebrow: { color: palette.indigo, fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
+  title: { color: palette.ink, fontSize: 22, fontWeight: '800', marginTop: 1 },
+  progressBadge: {
     alignItems: 'center',
     backgroundColor: palette.indigo,
     borderRadius: radii.lg,
     paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingVertical: 7,
   },
-  statBadgeValue: { color: '#FFFFFF', fontSize: 18, fontWeight: '800' },
-  statBadgeLabel: { color: '#D7DAFF', fontSize: 11 },
-  statRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10 },
-  statItem: { color: palette.muted, fontSize: 13, fontWeight: '600' },
-  statDot: { color: palette.faint },
-  segment: {
-    flexDirection: 'row',
-    gap: 8,
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.md,
-    backgroundColor: palette.surfaceSoft,
-    borderRadius: radii.lg,
-    padding: 4,
-  },
-  segmentItem: { flex: 1, paddingVertical: 9, borderRadius: radii.md, alignItems: 'center' },
-  segmentItemActive: { backgroundColor: palette.surface, ...shadows },
-  segmentText: { color: palette.muted, fontSize: 13.5, fontWeight: '700' },
-  segmentTextActive: { color: palette.ink },
-  searchWrap: { paddingHorizontal: spacing.lg, marginTop: spacing.md },
-  searchBox: {
+  progressValue: { color: '#FFFFFF', fontSize: 17, fontWeight: '800' },
+  progressLabel: { color: '#D7DAFF', fontSize: 10, fontWeight: '600' },
+  statRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
+  statPill: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: radii.md,
     backgroundColor: palette.surface,
     borderWidth: 1,
     borderColor: palette.border,
-    borderRadius: radii.lg,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
   },
-  searchIcon: { color: palette.muted, fontSize: 18 },
-  searchInput: { flex: 1, color: palette.ink, fontSize: 15 },
-  searchClear: { color: palette.faint, fontSize: 14, paddingHorizontal: 4 },
-  canvasWrap: { flex: 1, marginTop: spacing.md, position: 'relative', overflow: 'hidden' },
+  statNum: { color: palette.ink, fontSize: 15, fontWeight: '800' },
+  statLabel: { color: palette.muted, fontSize: 11, fontWeight: '600' },
+  // ─── 工具栏（segment + search 合并） ───
+  toolbar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: spacing.lg,
+    marginTop: 10,
+  },
+  segment: {
+    flexDirection: 'row',
+    backgroundColor: palette.surfaceSoft,
+    borderRadius: radii.md,
+    padding: 3,
+  },
+  segmentItem: { paddingVertical: 7, paddingHorizontal: 10, borderRadius: 11 },
+  segmentItemActive: { backgroundColor: palette.surface, ...cardShadow },
+  segmentPressed: { opacity: 0.7 },
+  segmentText: { color: palette.muted, fontSize: 12, fontWeight: '700' },
+  segmentTextActive: { color: palette.ink },
+  searchBox: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: palette.surface,
+    borderWidth: 1,
+    borderColor: palette.border,
+    borderRadius: radii.md,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  searchIcon: { color: palette.muted, fontSize: 16 },
+  searchInput: { flex: 1, color: palette.ink, fontSize: 14, padding: 0 },
+  searchClear: { color: palette.faint, fontSize: 13, paddingHorizontal: 4 },
+  // ─── 画布 ───
+  canvasWrap: { flex: 1, marginTop: 8, position: 'relative', overflow: 'hidden' },
   canvasActions: {
     position: 'absolute',
     top: spacing.sm,
@@ -293,16 +339,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 6,
   },
-  roundBtn: {
+  fabBtn: {
     backgroundColor: palette.surface,
     borderWidth: 1,
     borderColor: palette.border,
     borderRadius: 99,
     paddingHorizontal: 12,
     paddingVertical: 6,
-    ...shadows,
+    ...cardShadow,
   },
-  roundBtnText: { color: palette.ink, fontSize: 12, fontWeight: '800' },
+  fabPressed: { opacity: 0.75 },
+  fabText: { color: palette.ink, fontSize: 12, fontWeight: '800' },
+  // ─── 图例 ───
   legend: {
     position: 'absolute',
     left: spacing.sm,
@@ -312,7 +360,7 @@ const styles = StyleSheet.create({
     borderColor: palette.border,
     borderRadius: radii.lg,
     padding: spacing.md,
-    ...shadows,
+    ...cardShadow,
   },
   legendTitle: { color: palette.ink, fontSize: 12, fontWeight: '800', marginBottom: 6 },
   legendRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 5 },
@@ -320,6 +368,7 @@ const styles = StyleSheet.create({
   legendText: { color: palette.muted, fontSize: 12.5 },
   legendDivider: { height: 1, backgroundColor: palette.border, marginVertical: 8 },
   legendHint: { color: palette.faint, fontSize: 11, lineHeight: 16 },
+  // ─── 搜索结果 ───
   searchResults: {
     position: 'absolute',
     top: 0,
@@ -329,9 +378,18 @@ const styles = StyleSheet.create({
     backgroundColor: palette.surface,
     borderBottomWidth: 1,
     borderBottomColor: palette.border,
-    ...shadows,
+    ...cardShadow,
   },
-  searchResultItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: spacing.lg, paddingVertical: 11 },
+  searchResultsScroll: { flex: 1 },
+  searchResultsContent: { paddingBottom: 8 },
+  searchResultItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 12,
+  },
+  searchResultPressed: { backgroundColor: palette.surfaceSoft },
   searchResultDot: { width: 10, height: 10, borderRadius: 5 },
-  searchResultText: { color: palette.ink, fontSize: 14, fontWeight: '600' },
+  searchResultText: { color: palette.ink, fontSize: 14, fontWeight: '600', flex: 1 },
 });
