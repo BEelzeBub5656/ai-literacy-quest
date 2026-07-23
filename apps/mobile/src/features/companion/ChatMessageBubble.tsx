@@ -68,7 +68,9 @@ export function ChatMessageBubble({ message, onSelectionRequest, onKeywordPress 
         ) : null}
 
         {!isUser && Boolean(message.keywords?.length) && (
-          <Text style={styles.hint}>点击带下划线的重点词，可提炼为简明知识卡片。</Text>
+          <Text style={styles.hint}>
+            哪里不懂点哪里：点击下划线即可即时解释，选择“引申”后再加入知识分支。
+          </Text>
         )}
         {!isUser && Boolean(message.content) && !message.isStreaming && (
           <View style={styles.actionRow}>

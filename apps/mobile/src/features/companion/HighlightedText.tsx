@@ -66,6 +66,8 @@ export function HighlightedText({
         return (
           <Text
             key={`${keyword.id}-${index}`}
+            accessibilityRole="button"
+            accessibilityLabel={`解释关键词：${segment.text}`}
             onPress={() => onKeywordPress?.(keyword)}
             style={[
               styles.keyword,

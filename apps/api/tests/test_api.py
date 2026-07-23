@@ -7,6 +7,8 @@ from campus_ai.core.config import Settings, get_settings
 from campus_ai.main import app
 from campus_ai.modules.ai_companion.schemas import (
     GenerateKnowledgeCardRequest,
+    InlineKeywordCollection,
+    InlineKeywordDraft,
     KeywordDraft,
     KnowledgeCardDraft,
     ReasoningStep,
@@ -86,12 +88,15 @@ async def test_structured_study_chat_and_knowledge_card() -> None:
                 "source_message_content": chat_payload["output"]["answer_markdown"],
                 "parent_card_id": None,
                 "keyword_context": "Middleware",
+                "relation": "associate",
             },
         )
         assert card.status_code == 200
         card_payload = card.json()["card"]
         assert card_payload["selected_text"] == "Middleware"
         assert card_payload["source_message_id"] == chat_payload["message_id"]
+        assert card_payload["source_type"] == "message"
+        assert card_payload["relation"] == "associate"
         assert len(card_payload["reasoning_steps"]) >= 2
         assert len(card_payload["keywords"]) == 3
 
@@ -119,6 +124,91 @@ async def test_streaming_study_chat_emits_reasoning_then_answer() -> None:
     assert body.index("event: answer_start") < body.index("event: answer_delta")
     assert "event: keywords" in body
     assert "event: done" in body
+
+
+@pytest.mark.asyncio
+async def test_annotate_text_endpoint_is_reusable_for_imported_content() -> None:
+    async with api_client() as client:
+        response = await client.post(
+            "/api/v1/ai/annotate-text",
+            json={
+                "text": "Agent 会通过工具调用完成外部动作。",
+                "source_context": "用户导入的网页片段",
+                "learner_context": "第一次接触智能体",
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["text"] for item in payload["keywords"]] == ["Agent", "工具调用"]
+
+
+@pytest.mark.asyncio
+async def test_annotation_policy_covers_learning_barriers_and_filters_invalid_terms(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, str] = {}
+
+    async def fake_generate_structured(*args, **kwargs):
+        messages = kwargs["messages"]
+        captured["system"] = messages[0].content
+        captured["user"] = messages[1].content
+        value = InlineKeywordCollection(
+            keywords=[
+                InlineKeywordDraft(
+                    text="相对论",
+                    normalized_text="相对论",
+                    importance=3,
+                ),
+                InlineKeywordDraft(
+                    text="E=mc²",
+                    normalized_text="e=mc²",
+                    importance=3,
+                ),
+                InlineKeywordDraft(
+                    text="爱因斯坦",
+                    normalized_text="爱因斯坦",
+                    importance=2,
+                ),
+                InlineKeywordDraft(
+                    text="不存在的词",
+                    normalized_text="不存在",
+                    importance=3,
+                ),
+                InlineKeywordDraft(
+                    text="相对论",
+                    normalized_text="相对论",
+                    importance=1,
+                ),
+            ]
+        )
+        return StructuredCompletion(
+            value=value,
+            provider="mock",
+            model="annotation-test",
+            fallback_used=False,
+        )
+
+    monkeypatch.setattr(
+        "campus_ai.modules.ai_companion.service.generate_structured",
+        fake_generate_structured,
+    )
+    service = AICompanionService(Settings(_env_file=None, ai_provider="mock"))
+    response = await service.annotate_text(
+        "爱因斯坦提出相对论，并用 E=mc² 描述质量与能量关系。",
+        source_context="物理学教材",
+        learner_context="初中生",
+    )
+
+    assert [item.text for item in response.keywords] == [
+        "相对论",
+        "E=mc²",
+        "爱因斯坦",
+    ]
+    for category in ("概念", "专业术语", "理论", "公式", "人名", "事件"):
+        assert category in captured["system"]
+    assert "<source_context>物理学教材</source_context>" in captured["user"]
+    assert "<learner_context>初中生</learner_context>" in captured["user"]
 
 
 @pytest.mark.asyncio

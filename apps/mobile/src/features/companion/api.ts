@@ -3,8 +3,11 @@ import { Platform } from 'react-native';
 import { z } from 'zod';
 
 import {
+  annotateTextResponseSchema,
   generateKnowledgeCardResponseSchema,
   inlineKeywordDraftSchema,
+  type CardRelationType,
+  type CardSourceType,
   type CompanionMessage,
   type InlineKeywordDraft,
 } from './contracts';
@@ -18,7 +21,7 @@ const aiStatusSchema = z.object({
 export type AIServiceStatus = z.infer<typeof aiStatusSchema>;
 
 const fallbackHost = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
-const apiBase = process.env.EXPO_PUBLIC_API_BASE_URL ?? `http://${fallbackHost}:8000/api/v1`;
+const apiBase = process.env.EXPO_PUBLIC_API_BASE_URL ?? `http://${fallbackHost}:8010/api/v1`;
 
 const metaSchema = z.object({
   conversation_id: z.string(),
@@ -143,12 +146,32 @@ export async function getAIServiceStatus(): Promise<AIServiceStatus> {
   return aiStatusSchema.parse(payload);
 }
 
+type AnnotateTextInput = {
+  text: string;
+  sourceContext?: string | null;
+  learnerContext?: string | null;
+};
+
+export async function annotateText(input: AnnotateTextInput) {
+  const payload = await requestJson('/ai/annotate-text', {
+    method: 'POST',
+    body: JSON.stringify({
+      text: input.text,
+      source_context: input.sourceContext ?? null,
+      learner_context: input.learnerContext ?? null,
+    }),
+  });
+  return annotateTextResponseSchema.parse(payload);
+}
+
 type GenerateCardInput = {
   selectedText: string;
   sourceMessageId: string;
   sourceMessageContent: string;
   parentCardId?: string | null;
   keywordContext?: string | null;
+  relation?: CardRelationType;
+  sourceType?: CardSourceType;
 };
 
 export async function generateKnowledgeCard(input: GenerateCardInput) {
@@ -160,6 +183,8 @@ export async function generateKnowledgeCard(input: GenerateCardInput) {
       source_message_content: input.sourceMessageContent,
       parent_card_id: input.parentCardId ?? null,
       keyword_context: input.keywordContext ?? null,
+      relation: input.relation ?? 'deepen',
+      source_type: input.sourceType ?? 'message',
     }),
   });
   return generateKnowledgeCardResponseSchema.parse(payload);

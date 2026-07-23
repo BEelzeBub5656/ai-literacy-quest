@@ -69,6 +69,7 @@ class StudyAssistantOutput(StrictModel):
 class StudyChatRequest(StrictModel):
     conversation_id: str = Field(min_length=1, max_length=80)
     messages: list[StudyChatMessage] = Field(min_length=1, max_length=24)
+    model: str | None = Field(default=None, min_length=1, max_length=120)
 
     @model_validator(mode="after")
     def require_latest_user_message(self) -> "StudyChatRequest":
@@ -96,8 +97,18 @@ class InlineKeywordCollection(StrictModel):
     keywords: list[InlineKeywordDraft] = Field(default_factory=list, max_length=8)
 
 
+class AnnotateTextRequest(StrictModel):
+    text: str = Field(min_length=1, max_length=8000)
+    source_context: str | None = Field(default=None, max_length=4000)
+    learner_context: str | None = Field(default=None, max_length=1000)
+
+
+class AnnotateTextResponse(StrictModel):
+    keywords: list[InlineKeywordDraft] = Field(default_factory=list, max_length=8)
+
+
 class EvidenceRef(StrictModel):
-    type: Literal["message", "card", "course", "concept"]
+    type: Literal["message", "card", "course", "concept", "vision-result"]
     id: str = Field(min_length=1, max_length=100)
 
 
@@ -124,12 +135,18 @@ class KnowledgeCardDraft(StrictModel):
         return self
 
 
+CardRelation = Literal["deepen", "associate", "branch"]
+CardSourceType = Literal["message", "vision-result"]
+
+
 class GenerateKnowledgeCardRequest(StrictModel):
     selected_text: str = Field(min_length=1, max_length=1000)
     source_message_id: str = Field(min_length=1, max_length=80)
     source_message_content: str = Field(min_length=1, max_length=8000)
     parent_card_id: str | None = Field(default=None, max_length=80)
     keyword_context: str | None = Field(default=None, max_length=80)
+    relation: CardRelation = "deepen"
+    source_type: CardSourceType = "message"
 
 
 class KnowledgeCardOutput(StrictModel):
@@ -137,6 +154,8 @@ class KnowledgeCardOutput(StrictModel):
     card_id: str
     parent_card_id: str | None
     source_message_id: str
+    source_type: CardSourceType
+    relation: CardRelation
     selected_text: str
     title: str
     plain_explanation: str

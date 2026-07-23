@@ -6,6 +6,8 @@ from pydantic import BaseModel, Field
 
 from campus_ai.core.config import get_settings
 from campus_ai.modules.ai_companion.schemas import (
+    AnnotateTextRequest,
+    AnnotateTextResponse,
     GenerateKnowledgeCardRequest,
     GenerateKnowledgeCardResponse,
     StudyChatRequest,
@@ -112,6 +114,15 @@ async def stream_study_chat(payload: StudyChatRequest) -> StreamingResponse:
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
         },
+    )
+
+
+@router.post("/annotate-text", response_model=AnnotateTextResponse)
+async def annotate_text(payload: AnnotateTextRequest) -> AnnotateTextResponse:
+    return await AICompanionService(get_settings()).annotate_text(
+        payload.text,
+        source_context=payload.source_context,
+        learner_context=payload.learner_context,
     )
 
 
