@@ -32,6 +32,13 @@ class MockAIProvider(AIProvider):
                 model="deterministic-demo",
                 content=json.dumps(_mock_knowledge_card(selected_text), ensure_ascii=False),
             )
+        if output_kind == "explanation_preview":
+            selected_text = _extract_selected_text(request)
+            return AICompletion(
+                provider=self.name,
+                model="deterministic-demo",
+                content=json.dumps(_mock_explanation_preview(selected_text), ensure_ascii=False),
+            )
         if output_kind == "stream_keywords":
             return AICompletion(
                 provider=self.name,
@@ -186,4 +193,27 @@ def _mock_knowledge_card(selected_text: str) -> dict:
         ],
         "assumptions": ["当前卡片用于 Agent 工程学习"],
         "uncertainties": [],
+    }
+
+
+def _mock_explanation_preview(selected_text: str) -> dict:
+    focus = selected_text[:10] or "当前知识点"
+    return {
+        "title": f"理解 {focus}",
+        "explanation": (
+            f"“{focus}”需要放回当前语境理解：先看它解决什么问题，"
+            "再观察它与相邻概念如何共同影响结果。"
+        ),
+        "keywords": [
+            {
+                "text": "当前语境",
+                "normalized_text": "current-context",
+                "importance": 3,
+            },
+            {
+                "text": "相邻概念",
+                "normalized_text": "related-concept",
+                "importance": 2,
+            },
+        ],
     }

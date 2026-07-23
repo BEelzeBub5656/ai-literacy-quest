@@ -5,6 +5,10 @@ from campus_ai.core.config import Settings
 from campus_ai.modules.ai_companion.schemas import (
     AnnotateTextResponse,
     EvidenceRef,
+    ExplanationPreviewDraft,
+    ExplanationPreviewOutput,
+    GenerateExplanationPreviewRequest,
+    GenerateExplanationPreviewResponse,
     GenerateKnowledgeCardRequest,
     GenerateKnowledgeCardResponse,
     InlineKeywordDraft,
@@ -312,4 +316,69 @@ class AICompanionService:
             model=completion.model,
             fallback_used=completion.fallback_used,
             card=card,
+        )
+
+    async def generate_explanation_preview(
+        self,
+        request: GenerateExplanationPreviewRequest,
+    ) -> GenerateExplanationPreviewResponse:
+        direction_hints = {
+            "deepen": "深入解释选中概念本身，讲清它是什么、为什么重要。",
+            "associate": "横向关联一个相邻概念，简要说明关系或区别。",
+            "branch": "换一个理解角度解释选中内容，但保留来源语境。",
+        }
+        prompt = (
+            f"{direction_hints[request.relation]}\n"
+            "只生成一张即时解释预览，不要生成知识成果卡、推理步骤或关键点列表。\n"
+            f"选中文本：{request.selected_text}\n"
+            f"来源消息：{request.source_message_content}\n"
+        )
+        if request.keyword_context:
+            prompt += f"触发关键词：{request.keyword_context}\n"
+
+        completion = await generate_structured(
+            self._ai_service,
+            output_kind="explanation_preview",
+            schema=ExplanationPreviewDraft,
+            messages=[
+                AIMessage(
+                    role="system",
+                    content=(
+                        "你是移动端即时解释器。标题不超过 12 个中文字符；"
+                        "explanation 用 45 至 100 个中文字符直接解释选中内容，"
+                        "准确、通俗、无需展示推理过程。"
+                        "keywords 最多 5 个，只标出 explanation 中逐字出现、"
+                        "且值得继续点击的概念；没有合适内容可以返回空数组。"
+                    ),
+                ),
+                AIMessage(role="user", content=prompt),
+            ],
+            max_tokens=420,
+            model=(
+                self._settings.resolved_deepseek_flash_model
+                if self._settings.ai_provider == "deepseek"
+                else None
+            ),
+        )
+        draft = completion.value
+        preview_id = f"preview-{uuid4().hex}"
+        return GenerateExplanationPreviewResponse(
+            provider=completion.provider,
+            model=completion.model,
+            fallback_used=completion.fallback_used,
+            preview=ExplanationPreviewOutput(
+                preview_id=preview_id,
+                parent_preview_id=request.parent_preview_id,
+                parent_card_id=request.parent_card_id,
+                source_message_id=request.source_message_id,
+                source_type=request.source_type,
+                relation=request.relation,
+                selected_text=request.selected_text,
+                title=draft.title,
+                explanation=draft.explanation,
+                keywords=draft.keywords,
+                evidence_refs=[
+                    EvidenceRef(type=request.source_type, id=request.source_message_id)
+                ],
+            ),
         )

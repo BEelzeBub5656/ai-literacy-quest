@@ -107,6 +107,12 @@ class AnnotateTextResponse(StrictModel):
     keywords: list[InlineKeywordDraft] = Field(default_factory=list, max_length=8)
 
 
+class ExplanationPreviewDraft(StrictModel):
+    title: str = Field(min_length=2, max_length=24)
+    explanation: str = Field(min_length=8, max_length=220)
+    keywords: list[InlineKeywordDraft] = Field(default_factory=list, max_length=5)
+
+
 class EvidenceRef(StrictModel):
     type: Literal["message", "card", "course", "concept", "vision-result"]
     id: str = Field(min_length=1, max_length=100)
@@ -137,6 +143,38 @@ class KnowledgeCardDraft(StrictModel):
 
 CardRelation = Literal["deepen", "associate", "branch"]
 CardSourceType = Literal["message", "vision-result"]
+
+
+class GenerateExplanationPreviewRequest(StrictModel):
+    selected_text: str = Field(min_length=1, max_length=1000)
+    source_message_id: str = Field(min_length=1, max_length=80)
+    source_message_content: str = Field(min_length=1, max_length=8000)
+    parent_preview_id: str | None = Field(default=None, max_length=80)
+    parent_card_id: str | None = Field(default=None, max_length=80)
+    keyword_context: str | None = Field(default=None, max_length=80)
+    relation: CardRelation = "deepen"
+    source_type: CardSourceType = "message"
+
+
+class ExplanationPreviewOutput(StrictModel):
+    preview_id: str
+    parent_preview_id: str | None
+    parent_card_id: str | None
+    source_message_id: str
+    source_type: CardSourceType
+    relation: CardRelation
+    selected_text: str
+    title: str
+    explanation: str
+    keywords: list[InlineKeywordDraft]
+    evidence_refs: list[EvidenceRef]
+
+
+class GenerateExplanationPreviewResponse(StrictModel):
+    provider: str
+    model: str
+    fallback_used: bool
+    preview: ExplanationPreviewOutput
 
 
 class GenerateKnowledgeCardRequest(StrictModel):

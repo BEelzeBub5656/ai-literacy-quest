@@ -8,6 +8,8 @@ from campus_ai.core.config import get_settings
 from campus_ai.modules.ai_companion.schemas import (
     AnnotateTextRequest,
     AnnotateTextResponse,
+    GenerateExplanationPreviewRequest,
+    GenerateExplanationPreviewResponse,
     GenerateKnowledgeCardRequest,
     GenerateKnowledgeCardResponse,
     StudyChatRequest,
@@ -138,6 +140,24 @@ async def generate_knowledge_card(
             detail={
                 "code": "AI_STRUCTURED_OUTPUT_INVALID",
                 "message": "知识卡片未通过结构化合同校验。",
+            },
+        ) from error
+    except Exception as error:
+        raise HTTPException(status_code=502, detail="AI Provider 暂时不可用。") from error
+
+
+@router.post("/explanation-preview", response_model=GenerateExplanationPreviewResponse)
+async def generate_explanation_preview(
+    payload: GenerateExplanationPreviewRequest,
+) -> GenerateExplanationPreviewResponse:
+    try:
+        return await AICompanionService(get_settings()).generate_explanation_preview(payload)
+    except StructuredOutputError as error:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "AI_STRUCTURED_OUTPUT_INVALID",
+                "message": "即时解释未通过结构化合同校验。",
             },
         ) from error
     except Exception as error:

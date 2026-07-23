@@ -4,6 +4,7 @@ import { z } from 'zod';
 
 import {
   annotateTextResponseSchema,
+  generateExplanationPreviewResponseSchema,
   generateKnowledgeCardResponseSchema,
   inlineKeywordDraftSchema,
   type CardRelationType,
@@ -173,6 +174,34 @@ type GenerateCardInput = {
   relation?: CardRelationType;
   sourceType?: CardSourceType;
 };
+
+type GenerateExplanationPreviewInput = {
+  selectedText: string;
+  sourceMessageId: string;
+  sourceMessageContent: string;
+  parentPreviewId?: string | null;
+  parentCardId?: string | null;
+  keywordContext?: string | null;
+  relation?: CardRelationType;
+  sourceType?: CardSourceType;
+};
+
+export async function generateExplanationPreview(input: GenerateExplanationPreviewInput) {
+  const payload = await requestJson('/ai/explanation-preview', {
+    method: 'POST',
+    body: JSON.stringify({
+      selected_text: input.selectedText,
+      source_message_id: input.sourceMessageId,
+      source_message_content: input.sourceMessageContent,
+      parent_preview_id: input.parentPreviewId ?? null,
+      parent_card_id: input.parentCardId ?? null,
+      keyword_context: input.keywordContext ?? null,
+      relation: input.relation ?? 'deepen',
+      source_type: input.sourceType ?? 'message',
+    }),
+  });
+  return generateExplanationPreviewResponseSchema.parse(payload);
+}
 
 export async function generateKnowledgeCard(input: GenerateCardInput) {
   const payload = await requestJson('/ai/knowledge-card', {

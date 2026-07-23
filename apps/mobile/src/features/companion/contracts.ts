@@ -51,6 +51,27 @@ const evidenceRefSchema = z.object({
   id: z.string(),
 }).strict();
 
+export const explanationPreviewSchema = z.object({
+  preview_id: z.string().min(1),
+  parent_preview_id: z.string().nullable(),
+  parent_card_id: z.string().nullable(),
+  source_message_id: z.string().min(1),
+  source_type: z.enum(['message', 'vision-result']),
+  relation: z.enum(['deepen', 'associate', 'branch']),
+  selected_text: z.string().min(1),
+  title: z.string().min(2),
+  explanation: z.string().min(8).max(220),
+  keywords: z.array(inlineKeywordDraftSchema).max(5),
+  evidence_refs: z.array(evidenceRefSchema),
+}).strict();
+
+export const generateExplanationPreviewResponseSchema = z.object({
+  provider: z.string(),
+  model: z.string(),
+  fallback_used: z.boolean(),
+  preview: explanationPreviewSchema,
+}).strict();
+
 export const knowledgeCardSchema = z.object({
   schema_version: z.literal('1.0'),
   card_id: z.string(),
@@ -84,9 +105,56 @@ export type KeywordItem = z.infer<typeof keywordSchema>;
 export type StudyAssistantOutput = z.infer<typeof studyAssistantOutputSchema>;
 export type StudyChatResponse = z.infer<typeof studyChatResponseSchema>;
 export type KnowledgeCard = z.infer<typeof knowledgeCardSchema>;
+export type ExplanationPreview = z.infer<typeof explanationPreviewSchema>;
+export type KnowledgeArtifact = KnowledgeCard;
 export type InlineKeywordDraft = z.infer<typeof inlineKeywordDraftSchema>;
 export type InlineKeywordItem = InlineKeywordDraft & { id: string };
 export type AnnotateTextResponse = z.infer<typeof annotateTextResponseSchema>;
+
+export function explanationPreviewKeywords(
+  preview: ExplanationPreview,
+): InlineKeywordItem[] {
+  return preview.keywords.map((keyword, index) => ({
+    ...keyword,
+    id: `${preview.preview_id}-keyword-${index + 1}`,
+  }));
+}
+
+export function promoteExplanationPreview(
+  preview: ExplanationPreview,
+): KnowledgeArtifact {
+  const inlineKeywords = explanationPreviewKeywords(preview);
+  return {
+    schema_version: '1.0',
+    card_id: preview.preview_id.replace(/^preview-/, 'card-'),
+    parent_card_id: preview.parent_card_id,
+    source_message_id: preview.source_message_id,
+    source_type: preview.source_type,
+    relation: preview.relation,
+    selected_text: preview.selected_text,
+    title: preview.title,
+    plain_explanation: preview.explanation,
+    reasoning_summary: '由用户确认的即时解释升级为知识成果。',
+    reasoning_steps: [{
+      step: 1,
+      title: '保留来源',
+      explanation: '成果内容沿用已阅读的即时解释，不再次改写。',
+      based_on: [`${preview.source_type}:${preview.source_message_id}`],
+    }],
+    key_points: [],
+    keywords: inlineKeywords.map((keyword) => ({
+      id: keyword.id,
+      text: keyword.text,
+      normalized_text: keyword.normalized_text,
+      definition: `可从“${keyword.text}”继续展开理解。`,
+      selection_reason: '来自用户确认保存的即时解释。',
+      confidence: keyword.importance === 3 ? 0.95 : keyword.importance === 2 ? 0.86 : 0.75,
+    })),
+    evidence_refs: preview.evidence_refs,
+    assumptions: [],
+    uncertainties: [],
+  };
+}
 
 export type CompanionMessage = {
   id: string;

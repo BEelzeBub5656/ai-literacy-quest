@@ -1,0 +1,4 @@
+INFO:     127.0.0.1:54926 - "GET /api/v1/ai/status HTTP/1.1" 200 OK
+INFO:     10.80.11.185:39140 - "GET /api/v1/ai/status HTTP/1.1" 200 OK
+INFO:     10.80.11.185:38352 - "POST /api/v1/ai/knowledge-card HTTP/1.1" 200 OK
+INFO:     10.80.11.185:38352 - "POST /api/v1/ai/knowledge-card HTTP/1.1" 200 OK
